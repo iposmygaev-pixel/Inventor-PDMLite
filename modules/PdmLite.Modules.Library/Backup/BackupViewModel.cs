@@ -14,6 +14,7 @@ namespace PdmLite.Modules.Library.Backup;
 /// <summary>Окно резервных копий: список, создание, восстановление (с окном «что изменится»), настройки.</summary>
 public sealed partial class BackupViewModel(
     LibraryBackupService service,
+    LibraryRestoreService restore,
     JsonSettings<LibrarySettings> settings,
     IEventBus events,
     ILogger<BackupViewModel> logger) : ObservableObject
@@ -85,7 +86,7 @@ public sealed partial class BackupViewModel(
         RestorePlan plan;
         try
         {
-            plan = await service.PlanRestoreAsync(path);
+            plan = await restore.PlanRestoreAsync(path);
         }
         catch (Exception ex)
         {
@@ -115,7 +116,7 @@ public sealed partial class BackupViewModel(
             return;
 
         BackupInfo? before = null;
-        await RunAsync("Восстановление", async (progress, ct) => before = await service.RestoreAsync(path, progress, ct));
+        await RunAsync("Восстановление", async (progress, ct) => before = await restore.RestoreAsync(path, progress, ct));
         Refresh();
         if (before is null)
             return;

@@ -5,7 +5,6 @@ using PdmLite.Core.Documents;
 using PdmLite.Core.Naming;
 using PdmLite.Data.Library;
 using PdmLite.Library.Catalog;
-using PdmLite.Library.Import;
 using PdmLite.Library.Storage;
 
 namespace PdmLite.Library.Items;
@@ -22,7 +21,7 @@ public sealed partial class LibraryItemService
         IProgress<(int Done, int Total, string? Current)>? progress = null, CancellationToken ct = default)
     {
         var storage = storageFactory();
-        await using var lease = await EnterWriteAsync(storage.Root, ct).ConfigureAwait(false);
+        await using var lease = await _files.EnterWriteAsync(storage.Root, ct).ConfigureAwait(false);
         if (!properties.IsAvailable)
             throw new InvalidOperationException($"Нет доступа к свойствам файлов Inventor: {properties.UnavailableReason}");
 
@@ -69,7 +68,7 @@ public sealed partial class LibraryItemService
         if (!properties.IsAvailable)
             throw new InvalidOperationException($"Нет доступа к свойствам файлов Inventor: {properties.UnavailableReason}");
         var storage = storageFactory();
-        await using var lease = await EnterWriteAsync(storage.Root, ct).ConfigureAwait(false);
+        await using var lease = await _files.EnterWriteAsync(storage.Root, ct).ConfigureAwait(false);
         var snapshots = await LoadItemsAsync(ids, ct).ConfigureAwait(false);
         var failed = new List<string>();
         int updated = 0, upToDate = 0, done = 0;
@@ -125,7 +124,7 @@ public sealed partial class LibraryItemService
                     if (backup is not null)
                     {
                         var errors = new List<Exception>();
-                        RestoreBackups([(full, backup)], errors);
+                        _files.RestoreBackups([(full, backup)], errors);
                         if (errors.Count > 0)
                         {
                             preserve = true;
@@ -137,7 +136,7 @@ public sealed partial class LibraryItemService
                     logger.LogWarning(ex, "Не удалось обновить свойства {Path}", full);
                     failed.Add($"{snapshot.Designation}: {ex.Message}");
                 }
-                finally { if (backup is not null && !preserve) TryDelete(backup); }
+                finally { if (backup is not null && !preserve) _files.TryDelete(backup); }
                 done++;
             }
         }

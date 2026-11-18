@@ -102,7 +102,7 @@ public class DesignationTheoryTests
     [InlineData("Винт (S10)", "Винт S10", true)]
     [InlineData("", "", true)]
     public void LooseKey_Cases(string a, string b, bool same) =>
-        Assert.Equal(same, LibraryItemService.LooseKey(a) == LibraryItemService.LooseKey(b));
+        Assert.Equal(same, LibraryDuplicateService.LooseKey(a) == LibraryDuplicateService.LooseKey(b));
 
     [Theory]
     [InlineData(1.0, 2.0, 1.0, 2.0, true)]

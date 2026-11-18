@@ -84,8 +84,8 @@ public class MutationReliabilityTests
         async Task Run()
         {
             if (action == "edit") await service.ApplyEditAsync(catalog, source.Id, new("Болт M8x40 ГОСТ 7798-70", source.Kind, null, source.CategoryId));
-            else if (action == "duplicate") await service.DuplicateAsync(catalog, source.Id, new("Болт M8x40 ГОСТ 7798-70", source.Kind, null, source.CategoryId));
-            else if (action == "merge") await service.MergeDuplicatesAsync(keep.Id, [source.Id]);
+            else if (action == "duplicate") await service.Duplicates().DuplicateAsync(catalog, source.Id, new("Болт M8x40 ГОСТ 7798-70", source.Kind, null, source.CategoryId));
+            else if (action == "merge") await service.Duplicates().MergeDuplicatesAsync(keep.Id, [source.Id]);
             else if (action == "rewrite-properties-file")
             {
                 var path = Storage().GetFullPath(source.RelativePath);
@@ -154,7 +154,7 @@ public class MutationReliabilityTests
         try
         {
             await pause.Ready.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            await Assert.ThrowsAsync<InvalidOperationException>(() => backups.RestoreAsync(archive.Path));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => backups.Restorer().RestoreAsync(archive.Path));
             Assert.True(File.Exists(Storage().GetFullPath(Assert.Single(session.Candidates).TargetRelativePath!)));
         }
         finally { pause.Resume.TrySetResult(); }

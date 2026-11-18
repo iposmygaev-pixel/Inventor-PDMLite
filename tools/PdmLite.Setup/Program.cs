@@ -90,7 +90,7 @@ internal static class Setup
             if (await context.LibraryItems.AnyAsync())
                 throw new InvalidOperationException("В базе уже есть компоненты. Автоматическая замена запрещена. Восстановите архив вручную через PdmLite.");
             Console.WriteLine("Проверка и восстановление начальной библиотеки...");
-            await service.RestoreAsync(archive);
+            await new LibraryRestoreService(service, NullLogger<LibraryRestoreService>.Instance).RestoreAsync(archive);
             pending.Restored = true;
             state.Save();
         }

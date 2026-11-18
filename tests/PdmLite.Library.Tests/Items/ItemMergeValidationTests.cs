@@ -38,8 +38,8 @@ public class ItemMergeValidationTests
         var partId = all.Single(i => i.DocumentType == LibraryDocumentType.Part).Id;
         var asmId = all.Single(i => i.DocumentType == LibraryDocumentType.Assembly).Id;
 
-        await Assert.ThrowsAsync<ArgumentException>(() => items.MergeDuplicatesAsync(partId, [partId]));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => items.MergeDuplicatesAsync(partId, [asmId]));
+        await Assert.ThrowsAsync<ArgumentException>(() => items.Duplicates().MergeDuplicatesAsync(partId, [partId]));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => items.Duplicates().MergeDuplicatesAsync(partId, [asmId]));
         Assert.Equal(2, (await items.ListAsync(await items.LoadCatalogAsync())).Count);
     }
 
@@ -62,7 +62,7 @@ public class ItemMergeValidationTests
 
         var catalog = await items.LoadCatalogAsync();
         var source = (await items.ListAsync(catalog)).Single(i => i.DocumentType == LibraryDocumentType.Assembly);
-        var copyId = await items.DuplicateAsync(catalog, source.Id,
+        var copyId = await items.Duplicates().DuplicateAsync(catalog, source.Id,
             new LibraryItemEdit("Узел крепления исп.2", LibraryItemKind.Purchased, "Свой", source.CategoryId));
 
         var boltId = (await items.ListAsync(catalog)).Single(i => i.DocumentType == LibraryDocumentType.Part).Id;

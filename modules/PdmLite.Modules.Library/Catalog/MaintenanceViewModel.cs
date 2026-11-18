@@ -18,16 +18,18 @@ namespace PdmLite.Modules.Library.Catalog;
 public sealed partial class MaintenanceViewModel : ObservableObject
 {
     private readonly LibraryItemService _service;
+    private readonly LibraryDuplicateService _duplicates;
     private readonly LibraryCatalog _catalog;
     private readonly IReadOnlyCollection<Guid> _selectedIds;
     private CancellationTokenSource? _cts;
 
     private readonly LibraryBackupService? _backup;
 
-    public MaintenanceViewModel(LibraryItemService service, LibraryCatalog catalog, IReadOnlyCollection<Guid> selectedIds, int totalCount,
-        LibraryBackupService? backup = null)
+    public MaintenanceViewModel(LibraryItemService service, LibraryDuplicateService duplicates, LibraryCatalog catalog,
+        IReadOnlyCollection<Guid> selectedIds, int totalCount, LibraryBackupService? backup = null)
     {
         _service = service;
+        _duplicates = duplicates;
         _backup = backup;
         _catalog = catalog;
         _selectedIds = selectedIds;
@@ -195,7 +197,7 @@ public sealed partial class MaintenanceViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanCheck))]
     private Task FindDuplicatesAsync() => RunAsync("Поиск дубликатов", async (_, ct) =>
     {
-        var groups = await Task.Run(() => _service.FindDuplicatesAsync(_catalog, ct), ct);
+        var groups = await Task.Run(() => _duplicates.FindDuplicatesAsync(_catalog, ct), ct);
         ct.ThrowIfCancellationRequested();
         DuplicateRows.Clear();
         _groups.Clear();
@@ -250,7 +252,7 @@ public sealed partial class MaintenanceViewModel : ObservableObject
                 progress.Report((i, chosen.Count, group.Kept.Designation));
                 try
                 {
-                    await _service.MergeDuplicatesAsync(group.Kept.Entry.Item.Id,
+                    await _duplicates.MergeDuplicatesAsync(group.Kept.Entry.Item.Id,
                         group.Rows.Where(r => r != group.Kept).Select(r => r.Entry.Item.Id).ToList(), ct);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)

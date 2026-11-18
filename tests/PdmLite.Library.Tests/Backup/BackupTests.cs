@@ -69,12 +69,12 @@ public class BackupTests
         await ImportAsync(s, folders.AddFile("Гайка M8 ГОСТ 5915-70.ipt", "nut"));
         File.WriteAllText(Path.Combine(folders.Library, "мусор.txt"), "x");
 
-        var plan = await s.Backup.PlanRestoreAsync(backup.Path);
+        var plan = await s.Backup.Restorer().PlanRestoreAsync(backup.Path);
         Assert.Equal(["Болт M8x20 ГОСТ 7798-70"], plan.Added);
         Assert.Equal(["Гайка M8 ГОСТ 5915-70"], plan.Removed);
         Assert.False(plan.IsDamaged);
 
-        var before = await s.Backup.RestoreAsync(backup.Path);
+        var before = await s.Backup.Restorer().RestoreAsync(backup.Path);
 
         Assert.Equal(BackupReason.BeforeRestore, before.Manifest.Reason);
         var items = await s.Items.ListAsync(await s.Items.LoadCatalogAsync());
@@ -121,7 +121,7 @@ public class BackupTests
             writer.Write(doc.ToJsonString());
         }
 
-        await Assert.ThrowsAnyAsync<Exception>(() => s.Backup.RestoreAsync(broken));
+        await Assert.ThrowsAnyAsync<Exception>(() => s.Backup.Restorer().RestoreAsync(broken));
 
         Assert.Equal(2, (await s.Items.ListAsync(await s.Items.LoadCatalogAsync())).Count);
         Assert.True(File.Exists(Path.Combine(folders.Library, "Крепёж", "Гайки", "ГОСТ 5915-70", "Гайка M8 ГОСТ 5915-70.ipt")));
@@ -158,15 +158,15 @@ public class BackupTests
         var notBackup = Path.Combine(folders.Root, "other.zip");
         using (var zip = ZipFile.Open(notBackup, ZipArchiveMode.Create))
             zip.CreateEntry("readme.txt");
-        await Assert.ThrowsAsync<InvalidDataException>(() => s.Backup.PlanRestoreAsync(notBackup));
+        await Assert.ThrowsAsync<InvalidDataException>(() => s.Backup.Restorer().PlanRestoreAsync(notBackup));
 
         var backup = await s.Backup.CreateAsync(BackupReason.Manual);
         using (var zip = ZipFile.Open(backup.Path, ZipArchiveMode.Update))
             zip.Entries.Single(e => e.FullName.EndsWith(".ipt")).Delete();
-        var plan = await s.Backup.PlanRestoreAsync(backup.Path);
+        var plan = await s.Backup.Restorer().PlanRestoreAsync(backup.Path);
         Assert.True(plan.IsDamaged);
         Assert.Contains("нет файла", plan.MissingFiles[0]);
-        await Assert.ThrowsAsync<InvalidDataException>(() => s.Backup.RestoreAsync(backup.Path));
+        await Assert.ThrowsAsync<InvalidDataException>(() => s.Backup.Restorer().RestoreAsync(backup.Path));
 
         // Файл в архиве подменён — контрольная сумма не совпадает.
         var second = await s.Backup.CreateAsync(BackupReason.Manual);
@@ -178,7 +178,7 @@ public class BackupTests
             using var writer = new StreamWriter(zip.CreateEntry(name).Open());
             writer.Write("другое содержимое");
         }
-        var tampered = await s.Backup.PlanRestoreAsync(second.Path);
+        var tampered = await s.Backup.Restorer().PlanRestoreAsync(second.Path);
         Assert.True(tampered.IsDamaged);
         Assert.Contains("повреждён", tampered.MissingFiles[0]);
 
@@ -188,6 +188,6 @@ public class BackupTests
         File.SetAttributes(file, FileAttributes.Normal);
         File.AppendAllText(file, "изменён в Inventor");
         var honest = await s.Backup.CreateAsync(BackupReason.Manual);
-        Assert.False((await s.Backup.PlanRestoreAsync(honest.Path)).IsDamaged);
+        Assert.False((await s.Backup.Restorer().PlanRestoreAsync(honest.Path)).IsDamaged);
     }
 }

@@ -14,14 +14,17 @@ namespace PdmLite.Modules.Library.Catalog;
 public sealed partial class EditItemViewModel : ObservableObject
 {
     private readonly LibraryItemService _service;
+    private readonly LibraryDuplicateService _duplicates;
     private readonly LibraryCatalog _catalog;
     private readonly LibraryItemSummary _item;
     private int _checkVersion;
 
-    public EditItemViewModel(LibraryItemService service, LibraryCatalog catalog, LibraryItemSummary item, bool duplicate = false)
+    public EditItemViewModel(LibraryItemService service, LibraryDuplicateService duplicates, LibraryCatalog catalog, LibraryItemSummary item,
+        bool duplicate = false)
     {
         IsDuplicate = duplicate;
         _service = service;
+        _duplicates = duplicates;
         _catalog = catalog;
         _item = item;
         _designation = item.Designation;
@@ -84,7 +87,7 @@ public sealed partial class EditItemViewModel : ObservableObject
         try
         {
             var check = IsDuplicate
-                ? await _service.CheckDuplicateAsync(_catalog, _item.Id, Edit)
+                ? await _duplicates.CheckDuplicateAsync(_catalog, _item.Id, Edit)
                 : await _service.CheckEditAsync(_catalog, _item.Id, Edit);
             if (version != _checkVersion)
                 return; // пока проверяли, пользователь продолжил печатать
@@ -114,7 +117,7 @@ public sealed partial class EditItemViewModel : ObservableObject
         try
         {
             if (IsDuplicate)
-                await _service.DuplicateAsync(_catalog, _item.Id, Edit);
+                await _duplicates.DuplicateAsync(_catalog, _item.Id, Edit);
             else
                 await _service.ApplyEditAsync(_catalog, _item.Id, Edit);
             return null;

@@ -142,7 +142,7 @@ public class RestoreRollbackTests
 
         using var stop = new CancellationTokenSource();
         var swapped = false;
-        var service = new LibraryBackupService(db.Database, Storage, Options, NullLogger<LibraryBackupService>.Instance)
+        var service = new LibraryRestoreService(new LibraryBackupService(db.Database, Storage, Options, NullLogger<LibraryBackupService>.Instance), NullLogger<LibraryRestoreService>.Instance)
         {
             DeleteDirectory = path =>
             {

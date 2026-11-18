@@ -70,9 +70,15 @@ public sealed partial class LibraryItemService(
     Func<LibraryStorage> storageFactory,
     ILogger<LibraryItemService> logger)
 {
+    private readonly LibraryItemFiles _files = new(database, properties, logger);
+
+    // Для LibraryDuplicateService: те же база, хранилище свойств, папка и файловые операции.
+    internal IPdmDatabase Database => database;
+    internal IDocumentPropertyStore PropertyStore => properties;
+    internal Func<LibraryStorage> StorageFactory => storageFactory;
+    internal LibraryItemFiles Files => _files;
+
     internal Func<string, PdmDbContext> CreateVerificationContext { get; init; } = LibraryMutationCommit.CreateContext;
-    private Task<LibraryWriteLease> EnterWriteAsync(string root, CancellationToken ct) =>
-        LibraryWriteLease.EnterAsync(database, root, ex => logger.LogWarning(ex, "Операция библиотеки: очистка ресурсов"), ct);
 
     public async Task<LibraryCatalog> LoadCatalogAsync(CancellationToken ct = default)
     {
@@ -154,7 +160,7 @@ public sealed partial class LibraryItemService(
     public async Task ApplyEditAsync(LibraryCatalog catalog, Guid id, LibraryItemEdit edit, CancellationToken ct = default)
     {
         var storage = storageFactory();
-        await using var lease = await EnterWriteAsync(storage.Root, ct).ConfigureAwait(false);
+        await using var lease = await _files.EnterWriteAsync(storage.Root, ct).ConfigureAwait(false);
         var check = await CheckEditAsync(catalog, id, edit, ct).ConfigureAwait(false);
         if (check.HasErrors)
             throw new InvalidOperationException(string.Join(" ", check.Issues.Where(i => i.Severity == ImportSeverity.Error).Select(i => i.Message)));
@@ -193,7 +199,7 @@ public sealed partial class LibraryItemService(
             var (hash, size) = await LibraryStorage.HashAsync(newFull, ct).ConfigureAwait(false);
 
             if (moved)
-                await RelinkAssembliesAsync(db, storage, id, oldFull, newFull, backups, lease, ct).ConfigureAwait(false);
+                await _files.RelinkAssembliesAsync(db, storage, id, oldFull, newFull, backups, lease, ct).ConfigureAwait(false);
 
             var now = DateTime.UtcNow;
             var categoryChanged = item.CategoryId != category.Id;
@@ -238,8 +244,8 @@ public sealed partial class LibraryItemService(
                 throw commit.Preserve(failure, backups.Select(b => new RecoveryCopy(b.Path, b.Backup)));
             }
             var errors = new List<Exception>();
-            if (didMove) AttemptRollback(() => LibraryStorage.Delete(newFull), newFull, errors);
-            RestoreBackups(backups, errors);
+            if (didMove) _files.AttemptRollback(() => LibraryStorage.Delete(newFull), newFull, errors);
+            _files.RestoreBackups(backups, errors);
             if (errors.Count > 0)
             {
                 preserveBackups = true;
@@ -251,13 +257,13 @@ public sealed partial class LibraryItemService(
         finally
         {
             if (!preserveBackups)
-                foreach (var (_, backup) in backups) TryDelete(backup);
+                foreach (var (_, backup) in backups) _files.TryDelete(backup);
         }
 
-        if (moved) CleanupFolders(storage, Path.GetDirectoryName(oldFull)!);
+        if (moved) _files.CleanupFolders(storage, Path.GetDirectoryName(oldFull)!);
     }
 
-    private static LibraryItemSummary Summary(LibraryItem i, LibraryCatalog catalog) =>
+    internal static LibraryItemSummary Summary(LibraryItem i, LibraryCatalog catalog) =>
         new(i.Id, i.Designation, i.Kind, i.DocumentType, i.Standard, i.Manufacturer, i.CategoryId, catalog.Get(i.CategoryId)?.Path ?? "?",
             i.RelativePath, i.Version, i.ModifiedAt, i.ModifiedBy, i.StandardIsManual);
 
@@ -265,7 +271,7 @@ public sealed partial class LibraryItemService(
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
         var storage = storageFactory();
-        await using var lease = await EnterWriteAsync(storage.Root, ct).ConfigureAwait(false);
+        await using var lease = await _files.EnterWriteAsync(storage.Root, ct).ConfigureAwait(false);
         var usedIn = await UsedInAsync(id, ct).ConfigureAwait(false);
         if (usedIn.Count > 0)
             throw new InvalidOperationException("Компонент входит в сборки библиотеки: " + string.Join(", ", usedIn) + ". Сначала удалите их.");
@@ -309,42 +315,12 @@ public sealed partial class LibraryItemService(
             throw;
         }
         // БД уже зафиксирована: ошибка очистки не должна выдавать удаление за неуспешное.
-        TryDelete(staged);
+        _files.TryDelete(staged);
         try { storage.RemoveEmptyFolders(Path.GetDirectoryName(full)!); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         { logger.LogWarning(ex, "Не удалось убрать пустую папку после удаления {Path}", full); }
         logger.LogInformation("Компонент удалён из библиотеки: {Designation}", item.Designation);
     }
-
-    /// <summary>Сборки библиотеки, в которые входит компонент, — на новый путь файла.</summary>
-    private async Task RelinkAssembliesAsync(PdmDbContext db, LibraryStorage storage, Guid componentId, string oldFull, string newFull,
-        List<(string Path, string Backup)> backups, LibraryWriteLease lease, CancellationToken ct)
-    {
-        var assemblies = await db.LibraryItemReferences.Where(r => r.ComponentId == componentId)
-            .Join(db.LibraryItems, r => r.AssemblyId, i => i.Id, (_, i) => i).Include(i => i.Versions).ToListAsync(ct).ConfigureAwait(false);
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [oldFull] = newFull };
-
-        foreach (var assembly in assemblies)
-        {
-            var path = storage.GetFullPath(assembly.RelativePath);
-            backups.Add((path, LibraryStorage.Backup(path)));
-            lease.SetCopies(backups.Select(b => new RecoveryCopy(b.Path, b.Backup)));
-            LibraryStorage.ClearReadOnly(path);
-            await properties.ReplaceReferencesAsync(path, map, ct).ConfigureAwait(false);
-            var remaining = (await properties.ReadWithoutGeometryAsync(path, ct).ConfigureAwait(false)).References
-                .Where(r => ReferenceKey(r) == ReferenceKey(oldFull)).ToList();
-            if (remaining.Count > 0)
-                throw new InvalidOperationException($"В сборке «{Path.GetFileName(path)}» не заменились ссылки: {oldFull}. Изменение отменено.");
-            LibraryStorage.MakeReadOnly(path);
-            (assembly.FileHash, assembly.FileSize) = await LibraryStorage.HashAsync(path, ct).ConfigureAwait(false);
-            assembly.ModifiedAt = DateTime.UtcNow;
-            assembly.ModifiedBy = Environment.UserName;
-            if (assembly.Versions.SingleOrDefault(v => v.Version == assembly.Version) is { } current)
-                (current.FileHash, current.FileSize) = (assembly.FileHash, assembly.FileSize);
-        }
-    }
-
-    private static string ReferenceKey(string path) => Path.GetFullPath(path).Replace('\\', '/').ToUpperInvariant();
 
     /// <summary>Карточка «было/стало» для журнала.</summary>
     private sealed record ItemSnapshot(string Designation, LibraryItemKind Kind, string? Standard, string? Manufacturer, string? Category, string RelativePath);
@@ -352,39 +328,6 @@ public sealed partial class LibraryItemService(
     private static ItemSnapshot Snapshot(LibraryItem item, string? categoryPath) =>
         new(item.Designation, item.Kind, item.Standard, item.Manufacturer, categoryPath, item.RelativePath);
 
-    private static bool SamePath(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+    internal static bool SamePath(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
-    private void RestoreBackups(IEnumerable<(string Path, string Backup)> backups, List<Exception> errors)
-    {
-        foreach (var (path, backup) in backups)
-            AttemptRollback(() => LibraryStorage.Restore(backup, path), path, errors);
-    }
-    private void AttemptRollback(Action restore, string path, List<Exception> errors)
-    {
-        try { restore(); }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Неполное восстановление {Path}", path);
-            errors.Add(new IOException($"{path}: {ex.Message}", ex));
-        }
-    }
-    private void CleanupFolders(LibraryStorage storage, string folder)
-    {
-        try { storage.RemoveEmptyFolders(folder); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        { logger.LogWarning(ex, "Изменение сохранено, но пустая папка не удалена: {Path}", folder); }
-    }
-
-    /// <summary>Удаляет файл. Не удалось — не ошибка операции, только запись в журнал.</summary>
-    private void TryDelete(string path)
-    {
-        try
-        {
-            LibraryStorage.Delete(path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            logger.LogWarning(ex, "Не удалось удалить файл {Path}", path);
-        }
-    }
 }

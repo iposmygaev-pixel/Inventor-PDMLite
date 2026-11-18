@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using PdmLite.Core.Documents;
+using PdmLite.Data;
 using PdmLite.Core.Naming;
 using PdmLite.Data.Library;
 using PdmLite.Library.Catalog;
@@ -10,9 +12,20 @@ using PdmLite.Library.Storage;
 
 namespace PdmLite.Library.Items;
 
-/// <summary>Копирование компонента, поиск и объединение дубликатов.</summary>
-public sealed partial class LibraryItemService
+/// <summary>Копирование компонента, поиск и объединение дубликатов в библиотеке.</summary>
+/// <remarks>
+/// Работает с той же библиотекой, что и <see cref="LibraryItemService"/>: база, хранилище свойств, папка
+/// и файловые операции (блокировка записи, перевязка сборок, откат) берутся у него.
+/// </remarks>
+public sealed class LibraryDuplicateService(LibraryItemService items, ILogger<LibraryDuplicateService> logger)
 {
+    private readonly IPdmDatabase database = items.Database;
+    private readonly IDocumentPropertyStore properties = items.PropertyStore;
+    private readonly Func<LibraryStorage> storageFactory = items.StorageFactory;
+    private readonly LibraryItemFiles _files = items.Files;
+
+    private Func<string, PdmDbContext> CreateVerificationContext => items.CreateVerificationContext;
+
     // ---------- Дублирование ----------
 
     /// <summary>Проверка копии компонента с новыми значениями (обозначение должно отличаться).</summary>
@@ -52,7 +65,7 @@ public sealed partial class LibraryItemService
     public async Task<Guid> DuplicateAsync(LibraryCatalog catalog, Guid sourceId, LibraryItemEdit edit, CancellationToken ct = default)
     {
         var storage = storageFactory();
-        await using var lease = await EnterWriteAsync(storage.Root, ct).ConfigureAwait(false);
+        await using var lease = await _files.EnterWriteAsync(storage.Root, ct).ConfigureAwait(false);
         var check = await CheckDuplicateAsync(catalog, sourceId, edit, ct).ConfigureAwait(false);
         if (check.HasErrors)
             throw new InvalidOperationException(string.Join(" ", check.Issues.Where(i => i.Severity == ImportSeverity.Error).Select(i => i.Message)));
@@ -125,7 +138,7 @@ public sealed partial class LibraryItemService
         {
             if (!await commit.CanRollbackAsync().ConfigureAwait(false))
                 throw commit.Preserve(failure, [new RecoveryCopy(copied, copied)]);
-            TryDelete(copied);
+            _files.TryDelete(copied);
             throw;
         }
         logger.LogInformation("Компонент скопирован: {From} → {To}", source.Designation, check.CanonicalDesignation);
@@ -187,7 +200,7 @@ public sealed partial class LibraryItemService
                 return new DuplicateGroup(
                     string.Join("; ", groupReasons),
                     g.OrderBy(i => i.Designation, NaturalComparer.Instance)
-                        .Select(i => new DuplicateEntry(Summary(i, catalog), usedIn.GetValueOrDefault(i.Id), i.CreatedAt)).ToList(),
+                        .Select(i => new DuplicateEntry(LibraryItemService.Summary(i, catalog), usedIn.GetValueOrDefault(i.Id), i.CreatedAt)).ToList(),
                     groupReasons is [sameShape]);
             })
             .OrderBy(g => g.Items[0].Item.Designation, NaturalComparer.Instance)
@@ -230,7 +243,7 @@ public sealed partial class LibraryItemService
     public async Task MergeDuplicatesAsync(Guid keepId, IReadOnlyCollection<Guid> removeIds, CancellationToken ct = default)
     {
         var storage = storageFactory();
-        await using var lease = await EnterWriteAsync(storage.Root, ct).ConfigureAwait(false);
+        await using var lease = await _files.EnterWriteAsync(storage.Root, ct).ConfigureAwait(false);
         if (removeIds.Contains(keepId))
             throw new ArgumentException("Оставляемый компонент не может быть в списке удаляемых.", nameof(removeIds));
 
@@ -255,7 +268,7 @@ public sealed partial class LibraryItemService
             try
             {
                 // Сборки библиотеки: ссылки в файлах и состав в базе — на оставляемый компонент.
-                await RelinkAssembliesAsync(db, storage, removeId, removeFull, keepFull, backups, lease, ct).ConfigureAwait(false);
+                await _files.RelinkAssembliesAsync(db, storage, removeId, removeFull, keepFull, backups, lease, ct).ConfigureAwait(false);
                 var references = await db.LibraryItemReferences.Where(r => r.ComponentId == removeId).ToListAsync(ct).ConfigureAwait(false);
                 foreach (var reference in references)
                 {
@@ -273,7 +286,7 @@ public sealed partial class LibraryItemService
                     ItemId = keepId,
                     Details = JsonSerializer.Serialize(new { remove.Designation, remove.RelativePath, mergedId = removeId, into = keep.Designation }),
                 });
-                if (File.Exists(removeFull) && !SamePath(removeFull, keepFull))
+                if (File.Exists(removeFull) && !LibraryItemService.SamePath(removeFull, keepFull))
                 {
                     staged = removeFull + ".pdmlite-merge-" + Guid.NewGuid().ToString("N");
                     lease.SetCopies(backups.Select(b => new RecoveryCopy(b.Path, b.Backup)).Append(new RecoveryCopy(removeFull, staged)));
@@ -291,9 +304,9 @@ public sealed partial class LibraryItemService
                     throw commit.Preserve(failure, available);
                 }
                 var errors = new List<Exception>();
-                RestoreBackups(backups, errors);
+                _files.RestoreBackups(backups, errors);
                 if (staged is not null && File.Exists(staged))
-                    AttemptRollback(() => File.Move(staged, removeFull), removeFull, errors);
+                    _files.AttemptRollback(() => File.Move(staged, removeFull), removeFull, errors);
                 if (errors.Count > 0)
                 {
                     preserveBackups = true;
@@ -307,10 +320,10 @@ public sealed partial class LibraryItemService
             finally
             {
                 if (!preserveBackups)
-                    foreach (var (_, backup) in backups) TryDelete(backup);
+                    foreach (var (_, backup) in backups) _files.TryDelete(backup);
             }
 
-            if (staged is not null) TryDelete(staged);
+            if (staged is not null) _files.TryDelete(staged);
             try { storage.RemoveEmptyFolders(Path.GetDirectoryName(removeFull)!); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             { logger.LogWarning(ex, "Не удалось убрать пустую папку после объединения {Path}", removeFull); }

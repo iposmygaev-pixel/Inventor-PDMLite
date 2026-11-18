@@ -2,6 +2,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using PdmLite.Core.Documents;
 using PdmLite.Data;
+using PdmLite.Library.Backup;
+using PdmLite.Library.Items;
 using PdmLite.Library.Storage;
 
 namespace PdmLite.Library.Tests;
@@ -163,4 +165,14 @@ public sealed class TempFolders : IDisposable
             File.SetAttributes(file, FileAttributes.Normal);
         Directory.Delete(Root, true);
     }
+}
+
+/// <summary>Сервисы, которые работают с той же библиотекой, что и сервис из теста.</summary>
+internal static class LibraryServiceTestExtensions
+{
+    public static LibraryDuplicateService Duplicates(this LibraryItemService items) =>
+        new(items, NullLogger<LibraryDuplicateService>.Instance);
+
+    public static LibraryRestoreService Restorer(this LibraryBackupService backups) =>
+        new(backups, NullLogger<LibraryRestoreService>.Instance);
 }

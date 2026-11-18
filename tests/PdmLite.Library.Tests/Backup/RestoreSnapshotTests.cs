@@ -1,11 +1,8 @@
 using System.IO.Compression;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
-using PdmLite.Core.Documents;
 using PdmLite.Data;
 using PdmLite.Data.Library;
-using PdmLite.Index.Operations;
 using PdmLite.Library.Backup;
 using PdmLite.Library.Storage;
 
@@ -73,10 +70,10 @@ public sealed class RestoreSnapshotTests : IDisposable
                 using var writer = new StreamWriter(zip.CreateEntry(name).Open()); writer.Write("tampered after validation");
             }
         });
-        await service.RestoreAsync(source.Path, progress);
+        await service.Restorer().RestoreAsync(source.Path, progress);
         Assert.True(changed); Assert.Equal(expected, File.ReadAllText(model.KeepPath));
         if (delete) Assert.False(File.Exists(source.Path));
-        else Assert.True((await service.PlanRestoreAsync(source.Path)).IsDamaged);
+        else Assert.True((await service.Restorer().PlanRestoreAsync(source.Path)).IsDamaged);
     }
 
     [PostgresFact]
@@ -87,7 +84,7 @@ public sealed class RestoreSnapshotTests : IDisposable
             () => new BackupOptions(Path.Combine(_folders.Root, "Backups"), 1, 7), NullLogger<LibraryBackupService>.Instance);
         var expected = File.ReadAllText(model.KeepPath); var source = await service.CreateAsync(BackupReason.Scheduled);
         LibraryStorage.ClearReadOnly(model.KeepPath); File.AppendAllText(model.KeepPath, "current changes");
-        var safety = await service.RestoreAsync(source.Path);
+        var safety = await service.Restorer().RestoreAsync(source.Path);
         Assert.False(File.Exists(source.Path)); Assert.True(File.Exists(safety.Path));
         Assert.Equal(expected, File.ReadAllText(model.KeepPath));
     }

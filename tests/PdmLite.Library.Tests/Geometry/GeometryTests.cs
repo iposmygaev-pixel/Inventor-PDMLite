@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using PdmLite.Core.Documents;
-using PdmLite.Data.Library;
 using PdmLite.Library.Import;
 using PdmLite.Library.Items;
 using PdmLite.Library.Storage;
@@ -53,7 +52,7 @@ public class GeometryTests
         // Внесли M8-12 — в «Дубликатах» группа по геометрии, по умолчанию не отмечена (может быть законной копией).
         await import.CommitAsync(session);
         var catalog = await items.LoadCatalogAsync();
-        var group = Assert.Single(await items.FindDuplicatesAsync(catalog));
+        var group = Assert.Single(await items.Duplicates().FindDuplicatesAsync(catalog));
         Assert.True(group.GeometryOnly);
         Assert.Equal(2, group.Items.Count);
     }

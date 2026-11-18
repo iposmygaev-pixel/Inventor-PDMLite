@@ -125,7 +125,7 @@ public class RestoreCommitOutcomeTests
                   AND pid <> pg_backend_pid()
                 """);
         };
-        var service = new LibraryBackupService(wrapped, Storage, Options, NullLogger<LibraryBackupService>.Instance)
+        var service = new LibraryRestoreService(new LibraryBackupService(wrapped, Storage, Options, NullLogger<LibraryBackupService>.Instance), NullLogger<LibraryRestoreService>.Instance)
         {
             MoveDirectory = (from, to) =>
             {
@@ -173,7 +173,7 @@ public class RestoreCommitOutcomeTests
             Assert.Contains("CommitUnknown", File.ReadAllText(journal));
             Assert.Contains("Файловый откат не выполнялся", error.Message);
             // Новый сервис имитирует перезапуск процесса. Неизвестный исход остаётся заблокирован.
-            var retry = await Assert.ThrowsAsync<InvalidOperationException>(() => backup.RestoreAsync(archive.Path));
+            var retry = await Assert.ThrowsAsync<InvalidOperationException>(() => backup.Restorer().RestoreAsync(archive.Path));
             Assert.Contains(journal, retry.Message);
             AssertFiles(folders.Library, expectedRestored);
             AssertFiles(error.PreviousFolder, original);
@@ -228,15 +228,15 @@ public class RestoreCommitOutcomeTests
         await context.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock({0})", [key]);
         context.LibraryLog.Add(new LibraryLogEntry { Action = "restore", User = "test", At = DateTime.UtcNow, Details = marker });
         await context.SaveChangesAsync();
-        var service = new LibraryBackupService(db.Database, () => new LibraryStorage(folders.Library),
-            () => new BackupOptions(folders.Root, 3, 7), NullLogger<LibraryBackupService>.Instance) { VerificationTimeout = TimeSpan.FromMilliseconds(200) };
+        var service = new LibraryRestoreService(new LibraryBackupService(db.Database, () => new LibraryStorage(folders.Library),
+            () => new BackupOptions(folders.Root, 3, 7), NullLogger<LibraryBackupService>.Instance), NullLogger<LibraryRestoreService>.Instance) { VerificationTimeout = TimeSpan.FromMilliseconds(200) };
         var pending = await service.VerifyRestoreCommitAsync(key, marker);
         Assert.Equal(RestoreDatabaseOutcome.Unknown, pending.Outcome);
         Assert.NotNull(pending.Error);
         if (commit) await tx.CommitAsync(); else await tx.RollbackAsync();
         var normalBudget = new LibraryBackupService(db.Database, () => new LibraryStorage(folders.Library),
             () => new BackupOptions(folders.Root, 3, 7), NullLogger<LibraryBackupService>.Instance);
-        var finished = await normalBudget.VerifyRestoreCommitAsync(key, marker);
+        var finished = await normalBudget.Restorer().VerifyRestoreCommitAsync(key, marker);
         Assert.Equal(commit ? RestoreDatabaseOutcome.Committed : RestoreDatabaseOutcome.NotCommitted, finished.Outcome);
     }
 

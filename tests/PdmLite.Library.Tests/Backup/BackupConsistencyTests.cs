@@ -1,12 +1,9 @@
-using System.IO.Compression;
 using System.Runtime.InteropServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
-using PdmLite.Core.Documents;
 using PdmLite.Data;
 using PdmLite.Data.Library;
-using PdmLite.Index.Operations;
 using PdmLite.Library.Backup;
 using PdmLite.Library.Storage;
 
@@ -87,7 +84,7 @@ public sealed class BackupConsistencyTests : IDisposable
         });
         await Assert.ThrowsAnyAsync<IOException>(() => service.CreateAsync(BackupReason.Manual, progress));
         Assert.True(changed); Assert.Equal(previous.Path, Assert.Single(service.List()).Path);
-        Assert.False((await service.PlanRestoreAsync(previous.Path)).IsDamaged);
+        Assert.False((await service.Restorer().PlanRestoreAsync(previous.Path)).IsDamaged);
     }
 
     private sealed class CallbackProgress(Action<(int Done, int Total, string? Current)> report) : IProgress<(int Done, int Total, string? Current)>

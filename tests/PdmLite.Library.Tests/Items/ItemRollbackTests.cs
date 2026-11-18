@@ -7,7 +7,6 @@ using Microsoft.Win32.SafeHandles;
 using PdmLite.Core.Documents;
 using PdmLite.Data;
 using PdmLite.Data.Library;
-using PdmLite.Index.Operations;
 using PdmLite.Library.Backup;
 using PdmLite.Library.Items;
 using PdmLite.Library.Storage;
@@ -65,7 +64,7 @@ public sealed class ItemRollbackTests : IDisposable
     {
         await using var db = await TestDatabase.CreateAsync(); var model = await SeedAsync(db.Database);
         _store.Inner.IgnoreReplaceFor = "assembly.iam";
-        await Assert.ThrowsAnyAsync<InvalidOperationException>(() => Items(db.Database).MergeDuplicatesAsync(model.Keep, [model.Remove]));
+        await Assert.ThrowsAnyAsync<InvalidOperationException>(() => Items(db.Database).Duplicates().MergeDuplicatesAsync(model.Keep, [model.Remove]));
         Assert.True(File.Exists(model.RemovePath)); Assert.Equal([model.RemovePath], FileBackedStore.References(model.AssemblyPath));
         await using var after = db.Database.CreateContext(); Assert.NotNull(await after.LibraryItems.FindAsync(model.Remove));
     }
@@ -91,7 +90,7 @@ public sealed class ItemRollbackTests : IDisposable
         {
             if (OperatingSystem.IsWindows()) locked = File.Open(model.RemovePath, FileMode.Open, FileAccess.Read, FileShare.Read);
             else { mode = File.GetUnixFileMode(folder); File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute); }
-            await Assert.ThrowsAnyAsync<Exception>(() => Items(db.Database).MergeDuplicatesAsync(model.Keep, [model.Remove]));
+            await Assert.ThrowsAnyAsync<Exception>(() => Items(db.Database).Duplicates().MergeDuplicatesAsync(model.Keep, [model.Remove]));
         }
         finally { locked?.Dispose(); if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(folder, mode); }
         await using var after = db.Database.CreateContext(); Assert.NotNull(await after.LibraryItems.FindAsync(model.Remove));
@@ -178,7 +177,7 @@ public sealed class ItemRollbackTests : IDisposable
         LibraryRollbackException? failure = null;
         try
         {
-            failure = await Assert.ThrowsAsync<LibraryRollbackException>(() => Items(db.Database).MergeDuplicatesAsync(model.Keep, [model.Remove]));
+            failure = await Assert.ThrowsAsync<LibraryRollbackException>(() => Items(db.Database).Duplicates().MergeDuplicatesAsync(model.Keep, [model.Remove]));
             var copy = Assert.Single(failure.Copies, c => c.Original == model.AssemblyPath);
             Assert.Equal(original, File.ReadAllText(copy.Backup)); Assert.Contains(copy.Backup, failure.Message);
             Assert.Contains("Original relink failure", failure.InnerException!.ToString());

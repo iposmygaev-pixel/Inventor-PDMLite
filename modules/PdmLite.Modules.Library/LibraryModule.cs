@@ -56,10 +56,12 @@ public sealed class LibraryModule : IPdmModule
                 () => new BackupOptions(settings.Value.BackupFolder, settings.Value.BackupKeep, settings.Value.BackupIntervalDays),
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<LibraryBackupService>>());
         });
+        services.AddSingleton<LibraryRestoreService>();
         services.AddTransient<BackupViewModel>();
         services.AddSingleton<DesignationRuleService>();
         services.AddTransient<RulesViewModel>();
         services.AddSingleton<LibraryItemService>();
+        services.AddSingleton<LibraryDuplicateService>();
         services.AddSingleton<LibraryPanelViewModel>();
         services.AddTransient<ImportViewModel>();
         services.AddTransient<CatalogViewModel>();

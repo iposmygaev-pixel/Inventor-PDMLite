@@ -14,6 +14,8 @@ public partial class CatalogWindow : Window
 {
     private readonly CatalogViewModel _viewModel;
     private readonly IServiceProvider _services;
+    private PdmLite.Library.Items.LibraryDuplicateService Duplicates =>
+        _services.GetRequiredService<PdmLite.Library.Items.LibraryDuplicateService>();
 
     public CatalogWindow(CatalogViewModel viewModel, IServiceProvider services)
     {
@@ -41,7 +43,7 @@ public partial class CatalogWindow : Window
     {
         if (_viewModel is not { Selected: { } row, Catalog: { } catalog })
             return;
-        var editor = new EditItemWindow(new EditItemViewModel(_viewModel.Service, catalog, row.Item)) { Owner = this };
+        var editor = new EditItemWindow(new EditItemViewModel(_viewModel.Service, Duplicates, catalog, row.Item)) { Owner = this };
         if (editor.ShowDialog() == true)
             await _viewModel.OnEditedAsync();
     }
@@ -53,7 +55,7 @@ public partial class CatalogWindow : Window
             UiMessages.Info("Выделите компонент, который нужно скопировать.");
             return;
         }
-        var editor = new EditItemWindow(new EditItemViewModel(_viewModel.Service, catalog, row.Item, duplicate: true)) { Owner = this };
+        var editor = new EditItemWindow(new EditItemViewModel(_viewModel.Service, Duplicates, catalog, row.Item, duplicate: true)) { Owner = this };
         if (editor.ShowDialog() == true)
             await _viewModel.OnEditedAsync();
     }
@@ -104,7 +106,7 @@ public partial class CatalogWindow : Window
     {
         if (_viewModel.Catalog is not { } catalog)
             return;
-        var window = new MaintenanceWindow(new MaintenanceViewModel(_viewModel.Service, catalog, selected, _viewModel.Items.Count,
+        var window = new MaintenanceWindow(new MaintenanceViewModel(_viewModel.Service, Duplicates, catalog, selected, _viewModel.Items.Count,
             _services.GetService<PdmLite.Library.Backup.LibraryBackupService>())) { Owner = this };
         window.ShowDialog();
         if (window.Changed)

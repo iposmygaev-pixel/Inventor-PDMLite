@@ -1,8 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using PdmLite.Data.Library;
 using PdmLite.Index;
 using PdmLite.Library.Backup;
-using PdmLite.Library.Import;
 using PdmLite.Library.Items;
 using PdmLite.Library.Storage;
 
@@ -15,7 +13,7 @@ public class BackupEmptyLibraryTests
     [InlineData("items", "\"items\"")]
     [InlineData("we\"ird", "\"we\"\"ird\"")]
     public void Backup_QuoteIdentifier(string name, string expected) =>
-        Assert.Equal(expected, LibraryBackupService.QuoteIdentifier(name));
+        Assert.Equal(expected, LibraryRestoreService.QuoteIdentifier(name));
 
     [PostgresFact]
     public async Task Backup_EmptyLibrary_CreateAndRestore()
@@ -29,7 +27,7 @@ public class BackupEmptyLibraryTests
         var empty = await backups.CreateAsync(BackupReason.Manual);
         Assert.Equal(0, empty.Manifest.Items);
 
-        await backups.RestoreAsync(empty.Path);
+        await backups.Restorer().RestoreAsync(empty.Path);
         Assert.True(Directory.Exists(folders.Library));
         Assert.Equal(2, backups.List().Count); // ручная и «перед восстановлением»
     }

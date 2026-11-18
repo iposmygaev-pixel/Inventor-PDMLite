@@ -1,10 +1,7 @@
 using System.IO.Compression;
 using Microsoft.Extensions.Logging.Abstractions;
-using PdmLite.Data.Library;
 using PdmLite.Library.Backup;
-using PdmLite.Library.Checks;
 using PdmLite.Library.Import;
-using PdmLite.Library.Rules;
 using PdmLite.Library.Storage;
 
 namespace PdmLite.Library.Tests;
@@ -78,7 +75,7 @@ public class BackupEdgeTests
         }
         var before = Directory.EnumerateFiles(folders.Library, "*", SearchOption.AllDirectories).Order().ToList();
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => backup.RestoreAsync(created.Path));
+        await Assert.ThrowsAsync<InvalidDataException>(() => backup.Restorer().RestoreAsync(created.Path));
 
         Assert.Equal(before, Directory.EnumerateFiles(folders.Library, "*", SearchOption.AllDirectories).Order().ToList());
         Assert.False(File.Exists(Path.Combine(folders.Root, "evil.txt")));
@@ -103,11 +100,11 @@ public class BackupEdgeTests
             writer.Write("подменён");
         }
 
-        var plan = await backup.PlanRestoreAsync(created.Path);
+        var plan = await backup.Restorer().PlanRestoreAsync(created.Path);
 
         Assert.True(plan.IsDamaged);
         Assert.Contains(plan.MissingFiles, m => m.Contains("контрольная сумма"));
-        await Assert.ThrowsAsync<InvalidDataException>(() => backup.RestoreAsync(created.Path));
+        await Assert.ThrowsAsync<InvalidDataException>(() => backup.Restorer().RestoreAsync(created.Path));
     }
 
     [PostgresFact]

@@ -30,10 +30,10 @@ public class DuplicatesTests
         var source = Assert.Single(await items.ListAsync(catalog));
 
         // Та же копия без смены обозначения — нельзя.
-        var same = await items.CheckDuplicateAsync(catalog, source.Id, new LibraryItemEdit(source.Designation, source.Kind, null, source.CategoryId));
+        var same = await items.Duplicates().CheckDuplicateAsync(catalog, source.Id, new LibraryItemEdit(source.Designation, source.Kind, null, source.CategoryId));
         Assert.Contains(same.Issues, i => i.Message.Contains("должно быть своё"));
 
-        var id = await items.DuplicateAsync(catalog, source.Id,
+        var id = await items.Duplicates().DuplicateAsync(catalog, source.Id,
             new LibraryItemEdit("Болт M8-6gx20.109.40X.019 ГОСТ 7798-70", LibraryItemKind.Standard, null, source.CategoryId));
 
         var all = await items.ListAsync(catalog);
@@ -53,7 +53,7 @@ public class DuplicatesTests
     [InlineData("Болт M8-6gx20.109 ГОСТ 7798-70", "Болт M8-6g x 20 .109 ГОСТ 7798-70")]
     [InlineData("Гайка M8-6H.10 ГОСТ 5915-70", "гайка м8 - 6н.10 гост 5915-70")]
     public void LooseKey_IgnoresSpacesAndSigns(string a, string b) =>
-        Assert.Equal(LibraryItemService.LooseKey(a), LibraryItemService.LooseKey(b));
+        Assert.Equal(LibraryDuplicateService.LooseKey(a), LibraryDuplicateService.LooseKey(b));
 
     [PostgresFact]
     public async Task FindAndMerge_RelinksAssemblies_RemovesExtra_RemembersPath()
@@ -78,13 +78,13 @@ public class DuplicatesTests
         Assert.Equal(3, result.Added);
 
         var catalog = await items.LoadCatalogAsync();
-        var group = Assert.Single(await items.FindDuplicatesAsync(catalog));
+        var group = Assert.Single(await items.Duplicates().FindDuplicatesAsync(catalog));
         Assert.Equal(2, group.Items.Count);
         Assert.Contains("пробелами", group.Reason);
         var used = group.Items.Single(e => e.UsedIn == 1).Item; // стоит в узле
         var keep = group.Items.Single(e => e.UsedIn == 0).Item;
 
-        await items.MergeDuplicatesAsync(keep.Id, [used.Id]);
+        await items.Duplicates().MergeDuplicatesAsync(keep.Id, [used.Id]);
 
         var all = await items.ListAsync(catalog);
         Assert.Equal(2, all.Count);
@@ -93,7 +93,7 @@ public class DuplicatesTests
         var asmFull = folders.InLibrary(asmItem.RelativePath);
         Assert.Equal(folders.InLibrary(keep.RelativePath), store.Relinked[asmFull].Values.Last());
         Assert.Equal([asmItem.Designation], await items.UsedInAsync(keep.Id));
-        Assert.Empty(await items.FindDuplicatesAsync(catalog));
+        Assert.Empty(await items.Duplicates().FindDuplicatesAsync(catalog));
 
         // Сборки проектов со старым путём получат оставленный компонент.
         var index = await items.LoadPathIndexAsync();

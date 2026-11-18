@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using PdmLite.Data.Library;
 using PdmLite.Library.Designations;
 using PdmLite.Library.Import;
 using PdmLite.Library.Items;
@@ -48,5 +47,5 @@ public class DesignationParsingTests
     [InlineData("Болт M8-6gx20-.109", "Болт M8-6gx20.109", true)] // лишний знак между числами
     [InlineData("Болт M8-6gx20.109", "Болт M8-6gx2010.9", false)]
     public void LooseKey(string a, string b, bool same) =>
-        Assert.Equal(same, LibraryItemService.LooseKey(a) == LibraryItemService.LooseKey(b));
+        Assert.Equal(same, LibraryDuplicateService.LooseKey(a) == LibraryDuplicateService.LooseKey(b));
 }

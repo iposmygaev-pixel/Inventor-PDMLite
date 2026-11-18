@@ -38,7 +38,7 @@ public sealed class BackupArchiveValidationTests : IDisposable
     {
         var snapshot = JsonSerializer.SerializeToNode(new LibrarySnapshot())!; snapshot[table] = null;
         var path = Archive(snapshot.ToJsonString());
-        await Assert.ThrowsAsync<InvalidDataException>(() => Service.PlanRestoreAsync(path));
+        await Assert.ThrowsAsync<InvalidDataException>(() => Service.Restorer().PlanRestoreAsync(path));
         Assert.False(Directory.Exists(Path.Combine(_root, "library")));
     }
 
@@ -49,7 +49,7 @@ public sealed class BackupArchiveValidationTests : IDisposable
     public async Task Archive_InvalidPathsRejectedDuringPreview(string entry)
     {
         var path = Archive(JsonSerializer.Serialize(new LibrarySnapshot()), entry);
-        await Assert.ThrowsAsync<InvalidDataException>(() => Service.PlanRestoreAsync(path));
+        await Assert.ThrowsAsync<InvalidDataException>(() => Service.Restorer().PlanRestoreAsync(path));
         Assert.False(Directory.Exists(Path.Combine(_root, "library")));
     }
 
@@ -57,14 +57,14 @@ public sealed class BackupArchiveValidationTests : IDisposable
     public async Task Archive_WindowsCaseAliasesRejectedDuringPreview()
     {
         var path = Archive(JsonSerializer.Serialize(new LibrarySnapshot()), "files/Bolt.ipt", "files/bolt.ipt");
-        await Assert.ThrowsAsync<InvalidDataException>(() => Service.PlanRestoreAsync(path));
+        await Assert.ThrowsAsync<InvalidDataException>(() => Service.Restorer().PlanRestoreAsync(path));
     }
 
     [Fact]
     public async Task Archive_CyclicCategoriesRejectedBeforeDatabaseAccess()
     {
         var snapshot = new LibrarySnapshot { Categories = [Category(1, 2), Category(2, 1)] };
-        await Assert.ThrowsAsync<InvalidDataException>(() => Service.PlanRestoreAsync(Archive(JsonSerializer.Serialize(snapshot))));
+        await Assert.ThrowsAsync<InvalidDataException>(() => Service.Restorer().PlanRestoreAsync(Archive(JsonSerializer.Serialize(snapshot))));
     }
 
     [Theory]
@@ -72,7 +72,7 @@ public sealed class BackupArchiveValidationTests : IDisposable
     public async Task Archive_UnsupportedVersionRejected(int format)
     {
         var path = Archive(JsonSerializer.Serialize(new LibrarySnapshot()), format: format);
-        await Assert.ThrowsAsync<InvalidDataException>(() => Service.PlanRestoreAsync(path));
+        await Assert.ThrowsAsync<InvalidDataException>(() => Service.Restorer().PlanRestoreAsync(path));
     }
 
 
@@ -83,10 +83,10 @@ public sealed class BackupArchiveValidationTests : IDisposable
         var service = new LibraryBackupService(db.Database, () => new LibraryStorage(Path.Combine(_root, "library")),
             () => new BackupOptions(_root, 3, 7), NullLogger<LibraryBackupService>.Instance);
         var path = Archive(JsonSerializer.Serialize(new LibrarySnapshot()), "files/unverified.ipt");
-        var plan = await service.PlanRestoreAsync(path);
+        var plan = await service.Restorer().PlanRestoreAsync(path);
         Assert.True(plan.IsDamaged);
         Assert.Contains(plan.MissingFiles, p => p.Contains("контрольной суммы"));
-        await Assert.ThrowsAsync<InvalidDataException>(() => service.RestoreAsync(path));
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.Restorer().RestoreAsync(path));
         Assert.False(Directory.Exists(Path.Combine(_root, "library")));
     }
 
@@ -100,7 +100,7 @@ public sealed class BackupArchiveValidationTests : IDisposable
         Assert.Equal(3, results.Select(b => b.Path).Distinct().Count());
         Assert.Equal(3, service.List().Count);
         Assert.Empty(Directory.GetFiles(_root, "*.part"));
-        foreach (var backup in results) Assert.False((await service.PlanRestoreAsync(backup.Path)).IsDamaged);
+        foreach (var backup in results) Assert.False((await service.Restorer().PlanRestoreAsync(backup.Path)).IsDamaged);
     }
 
     private string Archive(string snapshot, string? entry = null, string? second = null, int format = 1)

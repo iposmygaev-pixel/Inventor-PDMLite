@@ -1,4 +1,4 @@
-using Npgsql;
+using System.Security.Cryptography;
 using PdmLite.Library.Items;
 using System.Data;
 using System.IO.Compression;
@@ -70,22 +70,19 @@ public sealed record BackupOptions(string Folder, int Keep, int IntervalDays);
 /// ZIP-архиве. Восстановление заменяет базу и папку целиком; перед ним делается копия текущего состояния,
 /// при ошибке выполняется откат; неполный откат сообщается явно.
 /// </summary>
-public sealed partial class LibraryBackupService(
+public sealed class LibraryBackupService(
     IPdmDatabase database,
     Func<LibraryStorage> storageFactory,
     Func<BackupOptions> options,
     ILogger<LibraryBackupService> logger)
 {
-    internal Action<string, string> MoveDirectory { get; init; } = Directory.Move;
-    internal Action<string> DeleteDirectory { get; init; } = path => Directory.Delete(path, recursive: true);
-
-    internal Func<string, PdmDbContext> CreateVerificationContext { get; init; } = connectionString =>
-        new PdmDbContext(new DbContextOptionsBuilder<PdmDbContext>().UseNpgsql(connectionString).UseSnakeCaseNamingConvention().Options);
-    internal TimeSpan VerificationTimeout { get; init; } = TimeSpan.FromSeconds(5);
-
     private const string ManifestEntry = "manifest.json";
     private const string DataEntry = "data/library.json";
-    private const string FilesPrefix = "files/";
+    internal const string FilesPrefix = "files/";
+
+    // Для LibraryRestoreService: восстановление идёт в ту же базу и папку, копию которых делает этот сервис.
+    internal IPdmDatabase Database => database;
+    internal Func<LibraryStorage> StorageFactory => storageFactory;
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -110,7 +107,7 @@ public sealed partial class LibraryBackupService(
     public Task<BackupInfo> CreateAsync(BackupReason reason, IProgress<(int Done, int Total, string? Current)>? progress = null,
         CancellationToken ct = default) => CreateCoreAsync(reason, progress, ct, null);
 
-    private async Task<BackupInfo> CreateCoreAsync(BackupReason reason, IProgress<(int Done, int Total, string? Current)>? progress,
+    internal async Task<BackupInfo> CreateCoreAsync(BackupReason reason, IProgress<(int Done, int Total, string? Current)>? progress,
         CancellationToken ct, Action<string>? reserve)
     {
         var opts = options();
@@ -267,6 +264,75 @@ public sealed partial class LibraryBackupService(
         }
     }
 
+    // ---------- Внутреннее: снимок базы и архив ----------
+
+    private static List<string> LibraryFiles(string root) => Directory.Exists(root)
+        ? Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal).ToList() : [];
+
+    /// <summary>Все таблицы библиотеки на один момент (одна транзакция).</summary>
+    private async Task<LibrarySnapshot> LoadSnapshotAsync(CancellationToken ct)
+    {
+        await database.MigrateAsync(ct).ConfigureAwait(false);
+        await using var db = database.CreateContext();
+        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct).ConfigureAwait(false);
+        var snapshot = new LibrarySnapshot
+        {
+            Categories = await db.LibraryCategories.AsNoTracking().OrderBy(c => c.Id).ToListAsync(ct).ConfigureAwait(false),
+            CategoryRules = await db.LibraryCategoryRules.AsNoTracking().OrderBy(r => r.Id).ToListAsync(ct).ConfigureAwait(false),
+            Items = await db.LibraryItems.AsNoTracking().OrderBy(i => i.Designation).ToListAsync(ct).ConfigureAwait(false),
+            Versions = await db.Set<LibraryItemVersion>().AsNoTracking().OrderBy(v => v.Id).ToListAsync(ct).ConfigureAwait(false),
+            Properties = await db.Set<LibraryItemProperty>().AsNoTracking().OrderBy(p => p.ItemId).ThenBy(p => p.Name).ToListAsync(ct).ConfigureAwait(false),
+            References = await db.LibraryItemReferences.AsNoTracking().OrderBy(r => r.AssemblyId).ThenBy(r => r.ComponentId).ToListAsync(ct).ConfigureAwait(false),
+            DesignationRules = await db.DesignationRules.AsNoTracking().OrderBy(r => r.Id).ToListAsync(ct).ConfigureAwait(false),
+            Log = await db.LibraryLog.AsNoTracking().OrderBy(l => l.Id).ToListAsync(ct).ConfigureAwait(false),
+        };
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+        return snapshot;
+    }
+
+    /// <summary>Копирует поток и считает SHA-256 скопированного.</summary>
+    private static async Task<string> CopyWithHashAsync(Stream source, Stream target, CancellationToken ct)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[81920];
+        int read;
+        while ((read = await source.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+        {
+            hash.AppendData(buffer, 0, read);
+            await target.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+        }
+        return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    internal static (LibrarySnapshot Snapshot, HashSet<string> Entries) ReadArchive(string path)
+    {
+        using var zip = ZipFile.OpenRead(path);
+        var data = zip.GetEntry(DataEntry) ?? throw new InvalidDataException("В копии нет данных базы.");
+        using var stream = data.Open();
+        var snapshot = JsonSerializer.Deserialize<LibrarySnapshot>(stream, Json) ?? throw new InvalidDataException("Данные базы в копии пусты.");
+        BackupValidation.Validate(snapshot, zip.Entries.Select(e => e.FullName));
+        return (snapshot, zip.Entries.Select(e => e.FullName).ToHashSet(StringComparer.Ordinal));
+    }
+
+    private static async Task WriteEntryAsync<T>(ZipArchive zip, string name, T value, CancellationToken ct)
+    {
+        var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
+        await using var stream = entry.Open();
+        await JsonSerializer.SerializeAsync(stream, value, Json, ct).ConfigureAwait(false);
+    }
+
+    private void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Не удалось удалить {Path}", path);
+        }
+    }
 }
 
 /// <summary>Все таблицы библиотеки — содержимое <c>data/library.json</c>.</summary>
