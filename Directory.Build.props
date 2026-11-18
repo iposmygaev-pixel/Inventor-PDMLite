@@ -16,8 +16,10 @@
   </PropertyGroup>
 
   <!-- Проекты с Inventor API собираются только на машине с Inventor 2025, в CI их не проверить.
-       Для них предупреждения пока не считаются ошибками: включить после проверки сборки с Inventor. -->
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'PdmLite.AddIn' Or '$(MSBuildProjectName)' == 'PdmLite.AddIn.Core' Or '$(MSBuildProjectName)' == 'PdmLite.Apprentice' Or '$(MSBuildProjectName)' == 'PdmLite.Explorer'">
+       Для них предупреждения пока не считаются ошибками. Проверка на машине с Inventor:
+         dotnet build PdmLite.sln -p:PdmLiteStrictInventor=true
+       Если сборка проходит, это исключение можно удалить. -->
+  <PropertyGroup Condition="'$(PdmLiteStrictInventor)' != 'true' And ('$(MSBuildProjectName)' == 'PdmLite.AddIn' Or '$(MSBuildProjectName)' == 'PdmLite.AddIn.Core' Or '$(MSBuildProjectName)' == 'PdmLite.Apprentice' Or '$(MSBuildProjectName)' == 'PdmLite.Explorer')">
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
 </Project>

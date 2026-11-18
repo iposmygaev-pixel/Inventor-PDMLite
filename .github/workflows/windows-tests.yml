@@ -15,8 +15,8 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '8.0.x'
       - name: Pin .NET 8 SDK for this CI checkout only
@@ -93,7 +93,7 @@ jobs:
             & "$env:PGBIN\pg_ctl.exe" -D $env:PDMLITE_PG_DATA -m fast -w stop
             if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL shutdown failed' }
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: windows-test-results
