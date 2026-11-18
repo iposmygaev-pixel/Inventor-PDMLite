@@ -38,6 +38,67 @@ public sealed class JsonSettingsTests : IDisposable
     }
 
     [Theory]
+    [InlineData("null")][InlineData("{")][InlineData("{\"Value\": []}")]
+    public void Settings_DamagedContentIsKeptBesideAndReported(string json)
+    {
+        var path = Path.Combine(_root, "settings.json");
+        File.WriteAllText(path, json);
+        var logger = new ListLogger();
+        var settings = new JsonSettings<Settings>("settings", _root, logger);
+
+        Assert.NotNull(settings.DamagedCopyPath);
+        Assert.Equal(_root, Path.GetDirectoryName(settings.DamagedCopyPath));
+        Assert.StartsWith("settings.json.damaged-", Path.GetFileName(settings.DamagedCopyPath));
+        Assert.Equal(json, File.ReadAllText(settings.DamagedCopyPath!));
+        Assert.Contains(settings.DamagedCopyPath!, settings.LoadProblem);
+        Assert.Contains(logger.Messages, m => m.Contains("повреждён") && m.Contains(settings.DamagedCopyPath!));
+
+        // Сохранение после повреждения пишет новые настройки, копия прежнего файла остаётся.
+        settings.Value.Value = "new";
+        settings.Save();
+        Assert.Equal(json, File.ReadAllText(settings.DamagedCopyPath!));
+        Assert.Equal("new", new JsonSettings<Settings>("settings", _root).Value.Value);
+    }
+
+    [Fact]
+    public void Settings_RepeatedLoadOfSameDamagedFileKeepsOneCopy()
+    {
+        File.WriteAllText(Path.Combine(_root, "settings.json"), "{");
+        var first = new JsonSettings<Settings>("settings", _root);
+        first.Reload();
+        var second = new JsonSettings<Settings>("settings", _root);
+        Assert.Equal(first.DamagedCopyPath, second.DamagedCopyPath);
+        Assert.Single(Directory.GetFiles(_root, "settings.json.damaged-*.bak"));
+
+        File.WriteAllText(Path.Combine(_root, "settings.json"), "[");
+        var third = new JsonSettings<Settings>("settings", _root);
+        Assert.NotEqual(first.DamagedCopyPath, third.DamagedCopyPath);
+        Assert.Equal(2, Directory.GetFiles(_root, "settings.json.damaged-*.bak").Length);
+    }
+
+    [Fact]
+    public void Settings_ValidOrMissingFileHasNoProblemAndNoCopy()
+    {
+        var missing = new JsonSettings<Settings>("settings", _root);
+        Assert.Null(missing.LoadProblem);
+        File.WriteAllText(Path.Combine(_root, "settings.json"), "{\"Value\": \"saved\"}");
+        var valid = new JsonSettings<Settings>("settings", _root);
+        Assert.Equal("saved", valid.Value.Value);
+        Assert.Null(valid.LoadProblem);
+        Assert.Null(valid.DamagedCopyPath);
+        Assert.Single(Directory.GetFiles(_root));
+    }
+
+    private sealed class ListLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+    }
+
+    [Theory]
     [InlineData("../escape")][InlineData(@"..\escape")][InlineData("/absolute")]
     [InlineData("a:stream")][InlineData(" ")][InlineData("")][InlineData("CON")]
     public void Settings_InvalidNamesDoNotWriteOutsideFolder(string name) =>

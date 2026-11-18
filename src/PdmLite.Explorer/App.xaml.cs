@@ -91,6 +91,8 @@ public partial class App : Application
             },
         });
         _logger = _host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("PdmLite.Explorer");
+        // Настройки окна читаются до создания журнала — сообщаем о повреждённом файле здесь.
+        if (settings.LoadProblem is { } settingsProblem) _logger.LogWarning("{Problem}", settingsProblem);
         DispatcherUnhandledException += OnDispatcherUnhandledException;
 
         RegisterExplorerPath();

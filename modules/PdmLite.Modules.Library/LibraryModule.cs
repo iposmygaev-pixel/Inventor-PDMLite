@@ -41,7 +41,8 @@ public sealed class LibraryModule : IPdmModule
 
     public void ConfigureServices(IServiceCollection services, HostKind host)
     {
-        services.TryAddSingleton(_ => new JsonSettings<LibrarySettings>(LibrarySettings.Name));
+        services.TryAddSingleton(sp => new JsonSettings<LibrarySettings>(LibrarySettings.Name,
+            logger: sp.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()?.CreateLogger("PdmLite.Settings")));
         services.AddSingleton<Func<LibraryStorage>>(sp =>
         {
             var settings = sp.GetRequiredService<JsonSettings<LibrarySettings>>();

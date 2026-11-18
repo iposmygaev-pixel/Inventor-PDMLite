@@ -13,7 +13,8 @@ public static class DatabaseServices
     /// </summary>
     public static IServiceCollection AddPdmDatabase(this IServiceCollection services)
     {
-        services.TryAddSingleton(_ => new JsonSettings<DatabaseSettings>(DatabaseSettings.Name));
+        services.TryAddSingleton(sp => new JsonSettings<DatabaseSettings>(DatabaseSettings.Name,
+            logger: sp.GetService<ILoggerFactory>()?.CreateLogger("PdmLite.Settings")));
         services.TryAddSingleton<IPdmDatabase>(sp =>
             new PdmDatabase(sp.GetRequiredService<JsonSettings<DatabaseSettings>>().Value, sp.GetRequiredService<ILoggerFactory>()));
         return services;
