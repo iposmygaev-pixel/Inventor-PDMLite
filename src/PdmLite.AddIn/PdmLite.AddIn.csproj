@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Загрузчик плагина: единственная сборка, которую Inventor загружает сам.
+    Он не зависит ни от каких пакетов и загружает плагин (PdmLite.AddIn.Core и его
+    зависимости из подпапки core) в отдельный AssemblyLoadContext — так версии
+    библиотек плагина не конфликтуют с библиотеками Inventor и других плагинов.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <AssemblyName>PdmLite.AddIn</AssemblyName>
+    <Description>Загрузчик плагина PdmLite для Autodesk Inventor 2025.</Description>
+
+    <!--
+      Регистрация плагина при сборке: после каждой сборки в папку плагинов Inventor
+      пишется PdmLite.addin, указывающий на только что собранную DLL. Собрали в Visual Studio —
+      Inventor при следующем запуске загрузит эту сборку. Отключить: -p:PdmLiteRegisterAddIn=false.
+    -->
+    <PdmLiteRegisterAddIn Condition="'$(PdmLiteRegisterAddIn)' == '' and '$(OS)' == 'Windows_NT'">true</PdmLiteRegisterAddIn>
+    <PdmLiteAddinFolder Condition="'$(PdmLiteAddinFolder)' == ''">$(APPDATA)\Autodesk\Inventor 2025\Addins</PdmLiteAddinFolder>
+    <PdmLiteAddinTemplate>$(MSBuildThisFileDirectory)..\..\deploy\PdmLite.addin.template</PdmLiteAddinTemplate>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Только порядок сборки: плагин собирается раньше загрузчика (в подпапку core).
+      На сборки плагина загрузчик не ссылается — иначе они попали бы в общий контекст.
+    -->
+    <ProjectReference Include="..\PdmLite.AddIn.Core\PdmLite.AddIn.Core.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+  </ItemGroup>
+
+  <Target Name="RegisterAddIn" AfterTargets="Build" Condition="'$(PdmLiteRegisterAddIn)' == 'true'">
+    <PropertyGroup>
+      <_AddinManifest>$([System.IO.File]::ReadAllText('$(PdmLiteAddinTemplate)').Replace('{ASSEMBLY_PATH}', '$(TargetPath)'))</_AddinManifest>
+    </PropertyGroup>
+    <MakeDir Directories="$(PdmLiteAddinFolder)" />
+    <WriteLinesToFile File="$(PdmLiteAddinFolder)\PdmLite.addin" Lines="$(_AddinManifest)" Overwrite="true"
+                      Encoding="utf-8" WriteOnlyWhenDifferent="true" />
+    <Message Importance="high" Text="PdmLite: плагин зарегистрирован в Inventor → $(TargetPath)" />
+  </Target>
+
+  <Import Project="..\..\build\Inventor.targets" />
+
+</Project>

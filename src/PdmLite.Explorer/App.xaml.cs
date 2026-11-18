@@ -1,0 +1,179 @@
+using System.Windows;
+using System.Windows.Threading;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using PdmLite.Apprentice;
+using PdmLite.Core.Documents;
+using PdmLite.Core.Domain;
+using PdmLite.Core.Modularity;
+using PdmLite.Core.Projects;
+using PdmLite.Core.Threading;
+using PdmLite.Hosting;
+using PdmLite.Link;
+using PdmLite.UI.Shared;
+
+namespace PdmLite.Explorer;
+
+public partial class App : Application
+{
+    private PdmHost? _host;
+    private ExplorerLinkServer? _linkServer;
+    private ILogger? _logger;
+
+    /// <summary>Служебный режим без окна: свойства файлов через Apprentice по запросам плагина Inventor.</summary>
+    public const string PropertyHostArgument = "--property-host";
+
+    protected override async void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+        if (e.Args.Contains(PropertyHostArgument))
+        {
+            await RunPropertyHostAsync();
+            return;
+        }
+
+        try
+        {
+            await StartAsync(StartupArgs.Parse(e.Args));
+        }
+        catch (Exception ex)
+        {
+            // async void: без перехвата ошибка запуска закрыла бы программу молча.
+            _logger?.LogCritical(ex, "Ошибка запуска");
+            UiMessages.Error("PdmLite Explorer не удалось запустить.", ex);
+            Shutdown(1);
+        }
+    }
+
+    /// <summary>
+    /// Запросы читаются из stdin, ответы пишутся в stdout (одна строка JSON). Процесс завершается, когда
+    /// плагин закрывает вход (Inventor закрыт). Окна, единственного экземпляра и модулей нет.
+    /// </summary>
+    private async Task RunPropertyHostAsync()
+    {
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        using var loggerFactory = LoggerFactory.Create(_ => { });
+        using var store = new ApprenticePropertyStore(loggerFactory.CreateLogger<ApprenticePropertyStore>());
+        var exitCode = 0;
+        try
+        {
+            using var input = new StreamReader(Console.OpenStandardInput(), new System.Text.UTF8Encoding(false));
+            await using var output = new StreamWriter(Console.OpenStandardOutput(), new System.Text.UTF8Encoding(false));
+            await Task.Run(() => PropertyHostProtocol.ServeAsync(input, output, store));
+        }
+        catch (Exception)
+        {
+            exitCode = 1;
+        }
+        Shutdown(exitCode);
+    }
+
+    private async Task StartAsync(StartupArgs args)
+    {
+        // Второй экземпляр передаёт аргументы уже запущенному Explorer и завершается.
+        if (await ExplorerInstanceForwarder.ForwardAsync(args))
+        {
+            Shutdown();
+            return;
+        }
+
+        var settings = new JsonSettings<ExplorerSettings>(ExplorerSettings.Name);
+        var dispatcher = new WpfUiDispatcher(Dispatcher);
+
+        _host = PdmHost.Create(new PdmHostOptions
+        {
+            Host = HostKind.Explorer,
+            ConfigureServices = services =>
+            {
+                services.AddSingleton<IUiDispatcher>(dispatcher);
+                services.AddSingleton(settings);
+                services.AddSingleton<IDocumentPropertyStore, ApprenticePropertyStore>();
+            },
+        });
+        _logger = _host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("PdmLite.Explorer");
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+
+        RegisterExplorerPath();
+        _host.Start();
+
+        var window = new MainWindow(new MainViewModel(_host, settings));
+        MainWindow = window;
+        window.Show();
+
+        _linkServer = new ExplorerLinkServer(
+            _host.Services.GetRequiredService<IProjectSession>(), _host.Events, dispatcher, window.BringToFront, _logger);
+        _linkServer.Start();
+
+        await OpenInitialProjectAsync(args, settings.Value);
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        // Страховка: если остановка модуля зависнет, процесс всё равно завершится
+        // и не будет держать файлы (иначе следующая сборка не сможет их перезаписать).
+        var watchdog = new Thread(() =>
+        {
+            Thread.Sleep(TimeSpan.FromSeconds(5));
+            _logger?.LogWarning("Завершение заняло больше 5 с — процесс завершается принудительно");
+            Environment.Exit(e.ApplicationExitCode);
+        }) { IsBackground = true, Name = "PdmLite exit watchdog" };
+        watchdog.Start();
+
+        var server = _linkServer; var host = _host;
+        async Task StopOwnedResources()
+        {
+            if (server is not null) await server.StopAsync().ConfigureAwait(false);
+            if (host is not null) await host.DisposeAsync().ConfigureAwait(false);
+        }
+        if (!SyncBridge.Run(StopOwnedResources, TimeSpan.FromSeconds(2)))
+            _logger?.LogWarning("Запросы ещё завершаются; освобождение сервисов отложено.");
+        base.OnExit(e);
+    }
+
+    private async Task OpenInitialProjectAsync(StartupArgs args, ExplorerSettings settings)
+    {
+        var path = args.ProjectPath
+                   ?? (args.RevealPath is { } reveal ? Path.GetDirectoryName(reveal) : null)
+                   ?? settings.LastProject;
+        if (path is null || (!Directory.Exists(path) && !File.Exists(path)))
+            return;
+
+        var session = _host!.Services.GetRequiredService<IProjectSession>();
+        try
+        {
+            await session.OpenAsync(ProjectInfo.FromPath(path));
+            if (args.RevealPath is not null)
+                _host.Events.Publish(new Core.Events.RevealDocumentRequested(args.RevealPath));
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Не удалось открыть проект {Path}", path);
+            UiMessages.Error($"Не удалось открыть проект:\n{path}", ex);
+        }
+    }
+
+    /// <summary>Сообщает плагину Inventor, где находится Explorer.</summary>
+    private void RegisterExplorerPath()
+    {
+        try
+        {
+            var shared = new JsonSettings<SharedSettings>(SharedSettings.Name);
+            if (Environment.ProcessPath is { } exe && !string.Equals(shared.Value.ExplorerPath, exe, StringComparison.OrdinalIgnoreCase))
+            {
+                shared.Value.ExplorerPath = exe;
+                shared.Save();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Не удалось сохранить путь к Explorer");
+        }
+    }
+
+    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        _logger?.LogError(e.Exception, "Необработанная ошибка");
+        UiMessages.Error("Произошла ошибка.", e.Exception);
+        e.Handled = true;
+    }
+}

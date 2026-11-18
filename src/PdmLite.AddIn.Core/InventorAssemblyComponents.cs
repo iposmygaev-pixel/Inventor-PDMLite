@@ -1,0 +1,296 @@
+using PdmLite.Core.IO;
+using Microsoft.Extensions.Logging;
+using PdmLite.Core.Documents;
+using PdmLite.Core.Threading;
+
+namespace PdmLite.AddIn.Core;
+
+/// <summary>Состав активной сборки и замена компонентов через Inventor API.</summary>
+public sealed class InventorAssemblyComponents(Inv.Application inventor, IUiDispatcher ui, ILogger<InventorAssemblyComponents> logger)
+    : IAssemblyComponents
+{
+    public Task<AssemblyInspection> InspectActiveAsync(CancellationToken cancellationToken = default) =>
+        ui.InvokeAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var assembly = ActiveAssembly();
+            var components = new Dictionary<string, (string? PartNumber, bool ContentCenter, int Count, bool Missing)>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var occurrence in AllOccurrences(assembly.ComponentDefinition.Occurrences))
+            {
+                if (PathOf(occurrence) is not { } path)
+                    continue;
+                if (components.TryGetValue(path, out var known))
+                {
+                    components[path] = known with { Count = known.Count + 1 };
+                    continue;
+                }
+
+                // Файл не найден — данные компонента не читаем вовсе: у такого вхождения Inventor может упасть.
+                if (IsMissing(occurrence))
+                {
+                    components[path] = (null, false, 1, true);
+                    continue;
+                }
+
+                var document = Safe(() => occurrence.Definition?.Document as Inv._Document, null);
+                components[path] = (InventorProperties.PartNumber(document), IsContentCenter(occurrence), 1, false);
+            }
+
+            return new AssemblyInspection(assembly.FullFileName,
+                components.Select(c => new AssemblyComponentInfo(c.Key, c.Value.PartNumber, c.Value.ContentCenter, c.Value.Count, c.Value.Missing)).ToList());
+        });
+
+    public Task<ReplacementResult> ReplaceAsync(IReadOnlyList<ComponentReplacement> replacements, CancellationToken cancellationToken = default, string? expectedAssemblyPath = null) =>
+        ui.InvokeAsync(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var top = ActiveAssembly();
+            AssemblyTarget.Verify(expectedAssemblyPath, top.FullFileName, cancellationToken);
+            var map = replacements.ToDictionary(r => r.OldPath, r => r.NewPath, StringComparer.OrdinalIgnoreCase);
+            var problems = new List<string>();
+            var modified = new List<string>();
+            DocumentBackupSet? backups = null;
+            string? backupFolder = null;
+            var replaced = 0;
+
+            // Замена делается в той сборке, где компонент стоит непосредственно: в самой сборке и в каждой подсборке.
+            foreach (var assembly in AssembliesOf(top))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var direct = assembly.ComponentDefinition.Occurrences.Cast<Inv.ComponentOccurrence>()
+                    .Where(o => !Safe(() => o.Suppressed, true))
+                    .Select(o => (Occurrence: o, Path: PathOf(o)))
+                    .Where(o => o.Path is not null && map.ContainsKey(o.Path))
+                    .GroupBy(o => o.Path!, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (direct.Count == 0)
+                    continue;
+
+                var file = assembly.FullFileName;
+                if (File.Exists(file) && File.GetAttributes(file).HasFlag(FileAttributes.ReadOnly))
+                {
+                    problems.Add($"{Path.GetFileName(file)}: файл только для чтения (например, сборка библиотеки) — не изменялась.");
+                    continue;
+                }
+
+                if (File.Exists(file))
+                {
+                    backups ??= new DocumentBackupSet(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PdmLite", "backups"), top.FullFileName);
+                    backupFolder = backups.Folder;
+                    backups.Copy(file);
+                }
+
+                var outcome = ReplacementBatch.Apply(direct,
+                    group => group.First().Occurrence.Replace(map[group.Key], true),
+                    group =>
+                    {
+                        // Исключение COM не доказывает отсутствие частично выполненной замены.
+                        var after = group.Select(o => PathOf(o.Occurrence)).ToList();
+                        if (after.Any(p => p is not null && !StringComparer.OrdinalIgnoreCase.Equals(p, group.Key))) return (bool?)true;
+                        return after.Any(p => p is null) ? null : false;
+                    },
+                    succeeded => FixNames(assembly, succeeded.Select(g => map[g.Key]).ToHashSet(StringComparer.OrdinalIgnoreCase), apply: true, logger).Count);
+                replaced += outcome.Replaced;
+                foreach (var failure in outcome.Failures)
+                {
+                    logger.LogWarning(failure.Error, "Ошибка замены {Old} в {Assembly}", failure.Item.Key, file);
+                    var state = failure.Changed is null ? " Результат не подтверждён — проверьте сборку."
+                        : failure.Changed.Value ? " Обнаружены частичные изменения сборки." : "";
+                    problems.Add($"{Path.GetFileName(file)}: замена «{Path.GetFileName(failure.Item.Key)}» завершилась ошибкой — {failure.Error.Message}.{state}");
+                }
+                if (outcome.Changed && !modified.Contains(file)) modified.Add(file);
+            }
+
+            logger.LogInformation("Замена компонентов в {Assembly}: {Count}, резервные копии: {Backup}", top.FullFileName, replaced, backupFolder);
+            return new ReplacementResult(replaced, modified, backupFolder, problems);
+        });
+
+    public Task<ComponentSelection> GetSelectionAsync(CancellationToken cancellationToken = default) =>
+        ui.InvokeAsync(() =>
+        {
+            var assembly = ActiveAssembly();
+            var selected = new List<string>();
+            var components = new List<string>();
+            var unsaved = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void Consider(Inv._Document? document, List<string> target)
+            {
+                if (document is null || string.IsNullOrEmpty(document.FullFileName) || !seen.Add(document.FullFileName))
+                    return;
+                target.Add(document.FullFileName);
+                if (document.Dirty)
+                    unsaved.Add(document.FullFileName);
+            }
+
+            // В браузере и на экране выделяются вхождения (во вложенных сборках — их представители, proxy).
+            foreach (var item in assembly.SelectSet)
+                if (item is Inv.ComponentOccurrence occurrence && occurrence.Definition?.Document is Inv._Document document)
+                    Consider(document, selected);
+
+            foreach (var path in selected.ToList())
+                if (Open(path) is Inv.AssemblyDocument sub)
+                    foreach (Inv._Document child in sub.AllReferencedDocuments)
+                        Consider(child, components);
+
+            return new ComponentSelection(selected, components, unsaved, assembly.FullFileName);
+        });
+
+    public Task<IReadOnlyList<OccurrenceRename>> FixOccurrenceNamesAsync(IReadOnlyCollection<string> componentPaths, bool apply,
+        CancellationToken cancellationToken = default, string? expectedAssemblyPath = null) =>
+        ui.InvokeAsync<IReadOnlyList<OccurrenceRename>>(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var top = ActiveAssembly();
+            if (apply || expectedAssemblyPath is not null) AssemblyTarget.Verify(expectedAssemblyPath, top.FullFileName, cancellationToken);
+            var paths = componentPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var result = new List<OccurrenceRename>();
+            foreach (var assembly in AssembliesOf(top))
+            {
+                // Сборки библиотеки — только для чтения, их имена не трогаем.
+                var file = assembly.FullFileName;
+                if (File.Exists(file) && File.GetAttributes(file).HasFlag(FileAttributes.ReadOnly))
+                    continue;
+                result.AddRange(FixNames(assembly, paths, apply, logger));
+            }
+            return result;
+        });
+
+    /// <summary>
+    /// Имена вхождений файлов <paramref name="paths"/> в сборке (одного уровня) — по имени файла
+    /// (у библиотеки оно совпадает с обозначением): «Болт M8…:1». Обычные имена не меняются.
+    /// </summary>
+    internal static List<OccurrenceRename> FixNames(Inv.AssemblyDocument assembly, IReadOnlySet<string> paths, bool apply, ILogger logger)
+    {
+        var occurrences = assembly.ComponentDefinition.Occurrences.Cast<Inv.ComponentOccurrence>()
+            .Where(o => !IsMissing(o))
+            .Select(o => (Occurrence: o, Name: Safe(() => o.Name, (string?)null)))
+            .Where(o => o.Name is not null)
+            .ToList();
+        var candidates = occurrences
+            .Select(o => (o.Occurrence, o.Name, Path: PathOf(o.Occurrence)))
+            .Where(o => o.Path is not null && paths.Contains(o.Path))
+            .Select(o => (o.Occurrence, Current: o.Name!, BaseName: Path.GetFileNameWithoutExtension(o.Path!)))
+            .ToList();
+        var plan = OccurrenceNaming.Plan(occurrences.Select(o => o.Name!), candidates.Select(c => (c.Current, c.BaseName)));
+
+        var result = new List<OccurrenceRename>();
+        foreach (var (oldName, newName) in plan)
+        {
+            var change = new OccurrenceRename(Path.GetFileName(assembly.FullFileName), oldName, newName);
+            if (!apply) { result.Add(change); continue; }
+            try
+            {
+                candidates.First(c => c.Current == oldName).Occurrence.Name = newName;
+                result.Add(change);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Не удалось переименовать вхождение {Old} → {New}", oldName, newName);
+            }
+        }
+        return result;
+    }
+
+    public Task SaveDocumentsAsync(IReadOnlyList<string> paths, CancellationToken cancellationToken = default) =>
+        ui.InvokeAsync(() =>
+        {
+            foreach (var path in paths)
+                if (Open(path) is { } document)
+                {
+                    document.Save();
+                    logger.LogInformation("Сохранён {Path}", path);
+                }
+        });
+
+    /// <summary>Документ, уже открытый в Inventor (в том числе как компонент сборки), или <c>null</c>.</summary>
+    private Inv._Document? Open(string path)
+    {
+        foreach (Inv._Document document in inventor.Documents)
+            if (string.Equals(document.FullFileName, path, StringComparison.OrdinalIgnoreCase))
+                return document;
+        return null;
+    }
+
+    private Inv.AssemblyDocument ActiveAssembly() =>
+        inventor.ActiveDocument as Inv.AssemblyDocument
+        ?? throw new InvalidOperationException("Активный документ — не сборка. Откройте или активируйте сборку, которую нужно проверить.");
+
+    /// <summary>
+    /// Все вхождения на всех уровнях, кроме подавленных. Вхождение, свойства которого Inventor не отдаёт
+    /// (виртуальное, не загруженное, повреждённое), пропускается — проверка остальных продолжается.
+    /// </summary>
+    private static IEnumerable<Inv.ComponentOccurrence> AllOccurrences(System.Collections.IEnumerable occurrences)
+    {
+        foreach (Inv.ComponentOccurrence occurrence in occurrences)
+        {
+            if (Safe(() => occurrence.Suppressed, true))
+                continue;
+            yield return occurrence;
+            if (IsMissing(occurrence))
+                continue; // состав ненайденной подсборки неизвестен
+            if (Safe(() => occurrence.SubOccurrences is { Count: > 0 } c ? c : null, null) is { } children)
+                foreach (var child in AllOccurrences(children))
+                    yield return child;
+        }
+    }
+
+    /// <summary>Сама сборка и все её подсборки (каждая — один раз).</summary>
+    private static IEnumerable<Inv.AssemblyDocument> AssembliesOf(Inv.AssemblyDocument top)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { top.FullFileName };
+        yield return top;
+        foreach (var occurrence in AllOccurrences(top.ComponentDefinition.Occurrences))
+            if (!IsMissing(occurrence) && Safe(() => occurrence.Definition?.Document as Inv.AssemblyDocument, null) is { } sub && seen.Add(sub.FullFileName))
+                yield return sub;
+    }
+
+    /// <summary>
+    /// Файл вхождения не найден (потерянная ссылка). Такое вхождение нельзя трогать дальше ссылки на файл:
+    /// обращение к его определению или документу может уронить Inventor.
+    /// </summary>
+    internal static bool IsMissing(Inv.ComponentOccurrence occurrence) =>
+        Safe(() => occurrence.ReferencedDocumentDescriptor?.ReferenceMissing == true, true);
+
+    /// <summary>Свойство Inventor API или <paramref name="fallback"/>, если Inventor его не отдаёт (COM-ошибка).</summary>
+    private static T Safe<T>(Func<T> read, T fallback)
+    {
+        try
+        {
+            return read();
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return fallback;
+        }
+    }
+
+    private static string? PathOf(Inv.ComponentOccurrence occurrence)
+    {
+        try
+        {
+            var path = occurrence.ReferencedDocumentDescriptor?.FullDocumentName;
+            return string.IsNullOrEmpty(path) ? null : path;
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return null; // виртуальный компонент — без файла
+        }
+    }
+
+    internal static bool IsContentCenter(Inv.ComponentOccurrence occurrence)
+    {
+        if (IsMissing(occurrence))
+            return false;
+        try
+        {
+            return occurrence.Definition is Inv.PartComponentDefinition { IsContentMember: true };
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return false;
+        }
+    }
+
+}

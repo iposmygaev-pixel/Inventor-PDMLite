@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PdmLite.Library\PdmLite.Library.csproj" />
+    <ProjectReference Include="..\..\src\PdmLite.Index\PdmLite.Index.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/PdmLite.Hosting/PdmLite.Hosting.csproj" />
+    <Compile Include="../../modules/PdmLite.Modules.Library/Checks/ContentCenterPrompt.cs" Link="Checks/ContentCenterPrompt.cs" />
+    <Compile Include="../../modules/PdmLite.Modules.Library/Checks/ContentCenterPromptLifetime.cs" Link="Checks/ContentCenterPromptLifetime.cs" />
+    <Compile Include="../../modules/PdmLite.Modules.Library/Checks/AssemblyCheckViewModel.cs" Link="Checks/AssemblyCheckViewModel.cs" />
+    <Compile Include="../../modules/PdmLite.Modules.Library/Checks/LibraryPathCache.cs" Link="Checks/LibraryPathCache.cs" />
+    <Compile Include="../../modules/PdmLite.Modules.Library/Checks/ContentCenterPromptAttempts.cs" Link="Checks/ContentCenterPromptAttempts.cs" />
+    <Compile Include="../../modules/PdmLite.Modules.Library/Settings/LibrarySettingsViewModel.cs" Link="LibrarySettingsViewModel.cs" />
+    <Compile Include="../../tools/PdmLite.Setup/PostgresSecretChannel.cs" Link="Installer/PostgresSecretChannel.cs" />
+    <Compile Include="../../tools/PdmLite.Setup/SetupState.cs" Link="Installer/SetupState.cs" />
+    <Compile Include="../../modules/PdmLite.Modules.References/ProjectHealthRow.cs" Link="ProjectHealthRow.cs" />
+  </ItemGroup>
+</Project>

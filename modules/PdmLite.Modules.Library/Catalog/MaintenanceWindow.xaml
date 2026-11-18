@@ -1,0 +1,205 @@
+<Window x:Class="PdmLite.Modules.Library.Catalog.MaintenanceWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:PdmLite.Modules.Library.Catalog"
+        xmlns:ui="clr-namespace:PdmLite.UI.Shared;assembly=PdmLite.UI.Shared"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance local:MaintenanceViewModel}"
+        Title="Обслуживание библиотеки" Width="1400" Height="880" MinWidth="760" MinHeight="460"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/PdmLite.UI.Shared;component/Themes/Theme.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <Style x:Key="WrapCell" TargetType="TextBlock">
+                <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="Margin" Value="0,3" />
+            </Style>
+            <Style x:Key="OldCell" TargetType="TextBlock" BasedOn="{StaticResource WrapCell}">
+                <Setter Property="Foreground" Value="#B3261E" />
+            </Style>
+            <Style x:Key="NewCell" TargetType="TextBlock" BasedOn="{StaticResource WrapCell}">
+                <Setter Property="Foreground" Value="#1E7B34" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Window.Style>
+        <StaticResource ResourceKey="Pdm.Window" />
+    </Window.Style>
+
+    <DockPanel Margin="12">
+        <!-- Низ: прогресс, остановка, закрытие -->
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <Button DockPanel.Dock="Right" Content="Закрыть" IsCancel="True" Click="Close_OnClick" />
+            <Button DockPanel.Dock="Right" Content="Остановить" Command="{Binding StopCommand}" Margin="0,0,8,0" />
+            <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                <ProgressBar Height="4" Value="{Binding Progress}" Maximum="100" />
+                <TextBlock Text="{Binding ProgressText}" Style="{StaticResource Pdm.Text.Hint}" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </DockPanel>
+
+        <TabControl>
+            <!-- ===== Свойства в файлах ===== -->
+            <TabItem Header="Свойства в файлах">
+                <DockPanel Margin="8">
+                    <StackPanel DockPanel.Dock="Top">
+                        <TextBlock Style="{StaticResource Pdm.Text.Hint}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Text="Сверяет свойства PdmLite в файлах компонентов с библиотекой: обозначение, SPEC_Section, стандарт, производитель, раздел, метка Content Center. «Проверить» только читает файлы. Файлы меняются лишь после «Применить к отмеченным» и подтверждения в окне со списком всех изменений." />
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Command="{Binding CheckCommand}" MinWidth="120" VerticalAlignment="Top">
+                                <StackPanel Orientation="Horizontal">
+                                    <Image Source="{StaticResource Pdm.Icon.Cmd.Check}" Style="{StaticResource Pdm.Icon16}" Margin="0,0,6,0" />
+                                    <TextBlock Text="Проверить" />
+                                </StackPanel>
+                            </Button>
+                            <StackPanel>
+                                <RadioButton IsChecked="{Binding OnlySelected}" IsEnabled="{Binding HasSelection}" Margin="0,2">
+                                    <TextBlock><Run Text="Выделенные в каталоге: " /><Run Text="{Binding SelectedCount, Mode=OneWay}" /></TextBlock>
+                                </RadioButton>
+                                <RadioButton IsChecked="{Binding OnlySelected, Converter={x:Static local:InverseBool.Instance}}" Margin="0,2">
+                                    <TextBlock><Run Text="Вся библиотека: " /><Run Text="{Binding TotalCount, Mode=OneWay}" /></TextBlock>
+                                </RadioButton>
+                            </StackPanel>
+                        </DockPanel>
+                        <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" Margin="0,8" FontWeight="SemiBold" />
+                    </StackPanel>
+
+                    <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0" LastChildFill="False">
+                        <Button DockPanel.Dock="Right" Command="{Binding ApplyCommand}" MinWidth="220">
+                            <TextBlock><Run Text="Применить к отмеченным файлам (" /><Run Text="{Binding ToApply, Mode=OneWay}" /><Run Text=")…" /></TextBlock>
+                        </Button>
+                    </DockPanel>
+
+                    <DataGrid ItemsSource="{Binding Changes}" IsReadOnly="True" CanUserSortColumns="False" SelectionMode="Single"
+                              ui:RightClickSelect.IsEnabled="True">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Отметить все файлы" Command="{Binding CheckAllFilesCommand}">
+                                    <MenuItem.CommandParameter><x:Static Member="local:BoolBox.True" /></MenuItem.CommandParameter>
+                                </MenuItem>
+                                <MenuItem Header="Снять все отметки" Command="{Binding CheckAllFilesCommand}">
+                                    <MenuItem.CommandParameter><x:Static Member="local:BoolBox.False" /></MenuItem.CommandParameter>
+                                </MenuItem>
+                                <Separator />
+                                <MenuItem Header="Копировать таблицу изменений" Command="{Binding CopyChangesCommand}">
+                                    <MenuItem.Icon><Image Source="{StaticResource Pdm.Icon.Cmd.CopyPath}" Style="{StaticResource Pdm.Icon16}" /></MenuItem.Icon>
+                                </MenuItem>
+                                <MenuItem Header="Проверить заново" Command="{Binding CheckCommand}">
+                                    <MenuItem.Icon><Image Source="{StaticResource Pdm.Icon.Cmd.Check}" Style="{StaticResource Pdm.Icon16}" /></MenuItem.Icon>
+                                </MenuItem>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
+                                <Setter Property="Height" Value="NaN" />
+                            </Style>
+                        </DataGrid.RowStyle>
+                        <DataGrid.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.HeaderTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{StaticResource Pdm.Brush.Toolbar}" BorderBrush="{StaticResource Pdm.Brush.Border}"
+                                                BorderThickness="0,1,0,0" Padding="4,4">
+                                            <StackPanel Orientation="Horizontal" ToolTip="{Binding Name.Path}">
+                                                <CheckBox IsChecked="{Binding Name.Apply, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding Name.CanApply}"
+                                                          VerticalAlignment="Center" Margin="0,0,6,0" ToolTip="Обновить этот файл" />
+                                                <Image Source="{Binding Name.Icon, Converter={StaticResource Pdm.IconKey}}" Style="{StaticResource Pdm.Icon16}" Margin="0,0,6,0" />
+                                                <TextBlock Text="{Binding Name.Designation}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Name.Path, StringFormat='   {0}'}" Style="{StaticResource Pdm.Text.Hint}" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Name.CountText, StringFormat='   ({0})'}" Style="{StaticResource Pdm.Text.Hint}" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </GroupStyle.HeaderTemplate>
+                            </GroupStyle>
+                        </DataGrid.GroupStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Свойство" Binding="{Binding Property}" Width="200" ElementStyle="{StaticResource WrapCell}" />
+                            <DataGridTextColumn Header="Сейчас в файле" Binding="{Binding Current}" Width="*" MinWidth="250" ElementStyle="{StaticResource OldCell}" />
+                            <DataGridTextColumn Header="Будет записано" Binding="{Binding Expected}" Width="*" MinWidth="250" ElementStyle="{StaticResource NewCell}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- ===== Дубликаты ===== -->
+            <TabItem Header="Дубликаты">
+                <DockPanel Margin="8">
+                    <DockPanel DockPanel.Dock="Top">
+                        <Button DockPanel.Dock="Right" Command="{Binding FindDuplicatesCommand}" MinWidth="150" VerticalAlignment="Top" Margin="8,0,0,0">
+                            <StackPanel Orientation="Horizontal">
+                                <Image Source="{StaticResource Pdm.Icon.Cmd.Search}" Style="{StaticResource Pdm.Icon16}" Margin="0,0,6,0" />
+                                <TextBlock Text="Найти дубликаты" />
+                            </StackPanel>
+                        </Button>
+                        <TextBlock Text="{Binding DuplicatesSummary}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                    </DockPanel>
+
+                    <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0" LastChildFill="False">
+                        <Button DockPanel.Dock="Right" Command="{Binding MergeCommand}" MinWidth="220">
+                            <TextBlock><Run Text="Объединить отмеченные группы (" /><Run Text="{Binding ToMerge, Mode=OneWay}" /><Run Text=")…" /></TextBlock>
+                        </Button>
+                    </DockPanel>
+
+                    <DataGrid ItemsSource="{Binding Duplicates}" CanUserSortColumns="False" SelectionMode="Single" CanUserAddRows="False"
+                              SelectedItem="{Binding SelectedDuplicate}" ui:RightClickSelect.IsEnabled="True">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Оставить этот компонент" Command="{Binding KeepSelectedCommand}" FontWeight="SemiBold" />
+                                <Separator />
+                                <MenuItem Header="Отметить все группы" Command="{Binding CheckAllGroupsCommand}">
+                                    <MenuItem.CommandParameter><x:Static Member="local:BoolBox.True" /></MenuItem.CommandParameter>
+                                </MenuItem>
+                                <MenuItem Header="Снять все отметки" Command="{Binding CheckAllGroupsCommand}">
+                                    <MenuItem.CommandParameter><x:Static Member="local:BoolBox.False" /></MenuItem.CommandParameter>
+                                </MenuItem>
+                                <Separator />
+                                <MenuItem Header="Найти заново" Command="{Binding FindDuplicatesCommand}">
+                                    <MenuItem.Icon><Image Source="{StaticResource Pdm.Icon.Cmd.Search}" Style="{StaticResource Pdm.Icon16}" /></MenuItem.Icon>
+                                </MenuItem>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.HeaderTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{StaticResource Pdm.Brush.Toolbar}" BorderBrush="{StaticResource Pdm.Brush.Border}"
+                                                BorderThickness="0,1,0,0" Padding="4,4">
+                                            <StackPanel Orientation="Horizontal">
+                                                <CheckBox IsChecked="{Binding Name.Merge, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"
+                                                          Margin="0,0,6,0" ToolTip="Объединить эту группу" />
+                                                <TextBlock Text="{Binding Name.Reason}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </GroupStyle.HeaderTemplate>
+                            </GroupStyle>
+                        </DataGrid.GroupStyle>
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="Оставить" Width="70" CanUserResize="False">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <RadioButton GroupName="{Binding GroupName}" IsChecked="{Binding Keep, UpdateSourceTrigger=PropertyChanged}"
+                                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Действие" Binding="{Binding Action, Mode=OneWay}" Width="80" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Обозначение" Binding="{Binding Designation, Mode=OneWay}" Width="320" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Файл в библиотеке" Binding="{Binding Path, Mode=OneWay}" Width="360" IsReadOnly="True" />
+                            <DataGridTextColumn Header="В сборках" Binding="{Binding UsedIn, Mode=OneWay}" Width="75" IsReadOnly="True" />
+                            <DataGridTextColumn Header="Добавлен" Binding="{Binding Created, Mode=OneWay}" Width="130" MinWidth="130" IsReadOnly="True" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>

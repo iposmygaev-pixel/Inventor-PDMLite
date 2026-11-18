@@ -1,0 +1,97 @@
+name: Windows tests
+
+on:
+  push:
+    branches: [main, work]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    # Официальный образ содержит PostgreSQL 17; оба набора тестируются на целевой ОС.
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Pin .NET 8 SDK for this CI checkout only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sdk = dotnet --list-sdks | ForEach-Object {
+            if ($_ -match '^(8\.0\.\d+)\s') { [version]$Matches[1] }
+          } | Sort-Object -Descending | Select-Object -First 1
+          if (-not $sdk) { throw '.NET 8 SDK was not installed by setup-dotnet' }
+          # Local development keeps the tracked latestMajor policy; CI uses exactly SDK 8.
+          @{
+            sdk = @{
+              version = $sdk.ToString()
+              rollForward = 'disable'
+              allowPrerelease = $false
+            }
+          } | ConvertTo-Json | Set-Content -LiteralPath global.json -Encoding utf8
+          dotnet --version
+      - name: Test core, settings, IPC and file utilities on Windows
+        run: dotnet test tests/PdmLite.Core.Tests -c Release --logger "trx;LogFileName=windows-core.trx" --results-directory TestResults
+      - name: Test update, uninstall and secret option-file permissions
+        shell: powershell
+        run: |
+          & .\deploy\installer\test-uninstall.ps1
+          & .\deploy\installer\test-update.ps1
+          & .\deploy\installer\test-postgresql-options.ps1
+      - name: Test legacy PostgreSQL secrets, release hashes and process guard
+        shell: powershell
+        run: |
+          & .\deploy\installer\test-legacy-postgres.ps1
+          & .\deploy\installer\test-release-hashes.ps1
+          & .\build\test-inventor-check.ps1
+      - name: Build installer bootstrapper
+        run: dotnet build tools/PdmLite.Setup -c Release
+      - name: Check installer scripts and compile online and offline recipes
+        shell: powershell
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --version=6.4.3 --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          }
+          & .\deploy\installer\test-installer.ps1 -IsccPath $iscc
+      - name: Start isolated PostgreSQL for library tests
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $data = Join-Path $env:RUNNER_TEMP 'pdmlite-pgdata'
+          $passwordFile = Join-Path $env:RUNNER_TEMP 'pdmlite-pg-password'
+          $password = [guid]::NewGuid().ToString('N')
+          Write-Output "::add-mask::$password"
+          Set-Content $passwordFile -Value $password -NoNewline -Encoding ascii
+          & "$env:PGBIN\initdb.exe" -D $data -U pdmlite -A scram-sha-256 "--pwfile=$passwordFile" --locale=C -E UTF8
+          if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL initdb failed' }
+          "PDMLITE_PG_DATA=$data" >> $env:GITHUB_ENV
+          & "$env:PGBIN\pg_ctl.exe" -D $data -l "$env:RUNNER_TEMP\pdmlite-postgres.log" -o '-h 127.0.0.1 -p 55432' -w start
+          if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL startup failed' }
+          "PDMLITE_TEST_PG=Host=127.0.0.1;Port=55432;Username=pdmlite;Password=$password;Database=postgres" >> $env:GITHUB_ENV
+          Remove-Item $passwordFile
+      - name: Test library with PostgreSQL on Windows
+        if: ${{ !cancelled() && env.PDMLITE_TEST_PG != '' }}
+        run: dotnet test tests/PdmLite.Library.Tests -c Release --logger "trx;LogFileName=windows-library.trx" --results-directory TestResults
+      - name: Stop test PostgreSQL
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:PDMLITE_PG_DATA -and (Test-Path "$env:PDMLITE_PG_DATA\postmaster.pid")) {
+            & "$env:PGBIN\pg_ctl.exe" -D $env:PDMLITE_PG_DATA -m fast -w stop
+            if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL shutdown failed' }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-test-results
+          path: TestResults/*.trx
+          if-no-files-found: warn
