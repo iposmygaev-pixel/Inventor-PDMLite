@@ -125,9 +125,14 @@ public sealed class LinkServer : IAsyncDisposable
                     Track(() => RespondAsync(connection, message, ct));
             }
         }
-        catch (Exception ex) when (ex is IOException or OperationCanceledException or ObjectDisposedException or JsonException)
+        catch (Exception ex) when (ex is IOException or OperationCanceledException or ObjectDisposedException)
         {
-            // клиент отключился или прислал мусор
+            // клиент отключился
+        }
+        catch (JsonException ex)
+        {
+            // клиент прислал не JSON — соединение закрывается, сервер продолжает работу
+            _logger.LogWarning(ex, "Канал связи {Pipe}: неверное сообщение от клиента", _pipeName);
         }
         finally
         {

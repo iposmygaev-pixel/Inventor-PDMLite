@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using PdmLite.Core.Documents;
 using PdmLite.Core.Events;
 using PdmLite.Core.Naming;
@@ -77,11 +78,14 @@ public sealed partial class FileOperationViewModel : ObservableObject
     private readonly HashSet<string> _wasOpen = new(StringComparer.OrdinalIgnoreCase);
     private FileOperationPlan? _plan;
     private bool _initializing = true;
+    private readonly ILogger? _logger;
 
     public FileOperationViewModel(ProjectFileOperations operations, IOpenDocuments openDocuments, IProjectSession session, IEventBus events,
-        IDocumentPropertyStore store, IDocumentLauncher launcher, string root, FileOperationMode mode, IReadOnlyList<string> sources, string? targetFolder)
+        IDocumentPropertyStore store, IDocumentLauncher launcher, string root, FileOperationMode mode, IReadOnlyList<string> sources, string? targetFolder,
+        ILogger? logger = null)
     {
         _launcher = launcher;
+        _logger = logger;
         _operations = operations;
         _openDocuments = openDocuments;
         _session = session;
@@ -214,9 +218,10 @@ public sealed partial class FileOperationViewModel : ObservableObject
                         Name = props.Title.Trim();
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // Свойства не прочитались — поля заполнятся по имени файла.
+                _logger?.LogWarning(ex, "Не удалось прочитать свойства {Path} для переименования", main);
             }
         }
 
@@ -419,9 +424,10 @@ public sealed partial class FileOperationViewModel : ObservableObject
                 await _session.RefreshAsync();
                 _events.Publish(new RevealDocumentRequested(IsFolderRename ? NewFolderTarget : plan.After(Main)));
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // Дерево обновится при следующем открытии проекта.
+                _logger?.LogWarning(ex, "Не удалось обновить дерево проекта после операции с файлами");
             }
             Completed?.Invoke(this, EventArgs.Empty);
         }

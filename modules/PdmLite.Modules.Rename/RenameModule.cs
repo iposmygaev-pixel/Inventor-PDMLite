@@ -1,6 +1,7 @@
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using PdmLite.Core.Documents;
 using PdmLite.Core.Domain;
 using PdmLite.Core.Events;
@@ -123,7 +124,8 @@ public sealed class RenameModule : IPdmModule
             services.GetRequiredService<IEventBus>(),
             services.GetRequiredService<IDocumentPropertyStore>(),
             services.GetRequiredService<IDocumentLauncher>(),
-            root, mode, paths, target);
+            root, mode, paths, target,
+            services.GetService<ILoggerFactory>()?.CreateLogger<FileOperationViewModel>());
         ShowWindow(context, new FileOperationWindow(viewModel));
         return Task.CompletedTask;
     }
@@ -138,7 +140,7 @@ public sealed class RenameModule : IPdmModule
             return Task.CompletedTask;
         }
         var viewModel = new RepairViewModel(services.GetRequiredService<ProjectFileOperations>(), services.GetRequiredService<IOpenDocuments>(),
-            session, project.RootFolder);
+            session, project.RootFolder, services.GetService<ILoggerFactory>()?.CreateLogger<RepairViewModel>());
         ShowWindow(context, new RepairWindow(viewModel));
         return Task.CompletedTask;
     }

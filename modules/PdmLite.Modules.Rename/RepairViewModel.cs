@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using PdmLite.Core.Documents;
 using PdmLite.Core.Projects;
 using PdmLite.Index.Operations;
@@ -44,7 +45,8 @@ public sealed partial class BrokenLinkRow : ObservableObject
 /// «Обновить связи проекта»: после переноса или переименования файлов в проводнике Windows — найти потерянные
 /// ссылки, подобрать файлы проекта с тем же именем и заменить ссылки во всех документах (с проверкой и откатом).
 /// </summary>
-public sealed partial class RepairViewModel(ProjectFileOperations operations, IOpenDocuments openDocuments, IProjectSession session, string root)
+public sealed partial class RepairViewModel(ProjectFileOperations operations, IOpenDocuments openDocuments, IProjectSession session, string root,
+    ILogger? logger = null)
     : ObservableObject
 {
     public string Root { get; } = Path.TrimEndingDirectorySeparator(root);
@@ -127,9 +129,10 @@ public sealed partial class RepairViewModel(ProjectFileOperations operations, IO
             {
                 await session.RefreshAsync();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // Дерево обновится позже.
+                logger?.LogWarning(ex, "Не удалось обновить дерево проекта после обновления связей");
             }
             Completed?.Invoke(this, EventArgs.Empty);
         }
