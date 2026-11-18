@@ -113,6 +113,9 @@ powershell -ExecutionPolicy Bypass -File deploy\install.ps1
 Если Inventor установлен не в стандартную папку: `-p:InventorInteropPath="D:\...\Autodesk.Inventor.Interop.dll"`
 (и поправьте путь к `Inventor.exe` в `src/PdmLite.AddIn/Properties/launchSettings.json`).
 
+Без Inventor собирается всё, кроме плагина, Apprentice и Explorer: `dotnet build PdmLite.NoInventor.slnf`
+(так собирает CI). Предупреждения компилятора считаются ошибками, кроме проектов с Inventor API.
+
 Тесты: `dotnet test` или «Тест → Обозреватель тестов». Тесты библиотеки с базой выполняются,
 если задана переменная `PDMLITE_TEST_PG` (подключение с правом создавать базы, например
 `Host=localhost;Username=postgres;Password=...`), иначе пропускаются.
@@ -175,8 +178,12 @@ deploy/                манифест плагина, установка
 - [Стиль оформления и иконки](docs/STYLE.md)
 - [Стандартная библиотека](docs/LIBRARY.md)
 - [Принятые решения и открытые вопросы](docs/DECISIONS.md)
-- [Результаты аудита, рефакторинга и тестирования](docs/REFACTORING_AUDIT.md)
+- [История изменений: аудит, рефакторинг, исправления и их тесты](docs/CHANGELOG.md)
+- [Неопределённый результат восстановления библиотеки и ручное завершение](docs/RESTORE_RECOVERY.md)
 
 Сборка двух установщиков PdmLite 0.1 (Online и Offline): [инструкция первого релиза](docs/RELEASE.md).
 
-Исправления жизненного цикла и согласованности (10 пунктов): [описание и тесты](docs/LIFECYCLE_RELIABILITY.md).
+## Лицензия
+
+[MIT No Attribution](LICENSE): код можно свободно использовать, изменять и распространять, в том числе
+в коммерческих целях, без указания авторства и без каких-либо условий. Программа предоставляется «как есть», без гарантий.
