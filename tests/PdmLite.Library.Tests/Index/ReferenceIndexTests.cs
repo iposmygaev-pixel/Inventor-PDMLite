@@ -126,7 +126,8 @@ public class ReferenceIndexTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         var parents = await index.WhereUsedAsync(part, true, deadline.Token);
-        Assert.Equal(assemblies.Reverse(), parents.Select(p => p.Path));
+        // AsEnumerable: в C# 14 у массива Reverse() — разворот на месте (void).
+        Assert.Equal(assemblies.AsEnumerable().Reverse(), parents.Select(p => p.Path));
         Assert.Equal(Enumerable.Range(1, 80), parents.Select(p => p.Level));
         Assert.Equal([assemblies[^1]], (await index.WhereUsedAsync(part, false, deadline.Token)).Select(p => p.Path));
         var cycle = await index.WhereUsedAsync(assemblies[0], true, deadline.Token);

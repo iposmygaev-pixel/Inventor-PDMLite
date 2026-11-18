@@ -3,9 +3,13 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- Предупреждения компилятора — ошибки сборки. Предупреждения NuGet об уязвимостях пакетов
-         (NU1901–NU1904) ошибками не считаются: они появляются без изменений в коде. -->
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Предупреждения компилятора — ошибки сборки только в CI (GitHub Actions задаёт CI=true) или по запросу:
+         dotnet build PdmLite.sln -p:PdmLiteStrict=true
+         Локальная сборка в Visual Studio не останавливается из-за предупреждений: более новый SDK
+         может добавить предупреждения, которых не было при проверке в CI. Предупреждения NuGet об
+         уязвимостях пакетов (NU1901–NU1904) ошибками не считаются: они появляются без изменений в коде. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors Condition="'$(CI)' == 'true' Or '$(PdmLiteStrict)' == 'true'">true</TreatWarningsAsErrors>
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
     <Company>PdmLite</Company>
     <Product>PdmLite</Product>
@@ -15,11 +19,4 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
 
-  <!-- Проекты с Inventor API собираются только на машине с Inventor 2025, в CI их не проверить.
-       Для них предупреждения пока не считаются ошибками. Проверка на машине с Inventor:
-         dotnet build PdmLite.sln -p:PdmLiteStrictInventor=true
-       Если сборка проходит, это исключение можно удалить. -->
-  <PropertyGroup Condition="'$(PdmLiteStrictInventor)' != 'true' And ('$(MSBuildProjectName)' == 'PdmLite.AddIn' Or '$(MSBuildProjectName)' == 'PdmLite.AddIn.Core' Or '$(MSBuildProjectName)' == 'PdmLite.Apprentice' Or '$(MSBuildProjectName)' == 'PdmLite.Explorer')">
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-  </PropertyGroup>
 </Project>

@@ -32,10 +32,10 @@
 
 **Сборка и CI**
 
-- Предупреждения компилятора считаются ошибками (`TreatWarningsAsErrors`) во всех проектах, кроме требующих Inventor API.
+- Предупреждения компилятора считаются ошибками (`TreatWarningsAsErrors`) в CI; локально — только с `-p:PdmLiteStrict=true`,
+  чтобы более новый SDK в Visual Studio не останавливал сборку новыми предупреждениями.
 - `PdmLite.NoInventor.slnf` — решение без проектов с Inventor API; CI собирает его целиком, то есть проверяет
   и модули WPF, а не только тесты.
-- Для проектов с Inventor API строгий режим включается вручную: `dotnet build PdmLite.sln -p:PdmLiteStrictInventor=true`.
 - GitHub Actions обновлены до версий на Node.js 24 (`checkout@v7`, `setup-dotnet@v5`, `upload-artifact@v7`).
 
 **Установка**

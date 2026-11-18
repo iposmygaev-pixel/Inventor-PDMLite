@@ -117,8 +117,8 @@ powershell -ExecutionPolicy Bypass -File deploy\install.ps1
 (и поправьте путь к `Inventor.exe` в `src/PdmLite.AddIn/Properties/launchSettings.json`).
 
 Без Inventor собирается всё, кроме плагина, Apprentice и Explorer: `dotnet build PdmLite.NoInventor.slnf`
-(так собирает CI). Предупреждения компилятора считаются ошибками, кроме проектов с Inventor API;
-для них строгий режим включается так: `dotnet build PdmLite.sln -p:PdmLiteStrictInventor=true`.
+(так собирает CI). В CI предупреждения компилятора считаются ошибками; локально — нет, строгий режим
+включается так: `dotnet build PdmLite.sln -p:PdmLiteStrict=true`.
 
 Тесты: `dotnet test` или «Тест → Обозреватель тестов». Тесты библиотеки с базой выполняются,
 если задана переменная `PDMLITE_TEST_PG` (подключение с правом создавать базы, например
