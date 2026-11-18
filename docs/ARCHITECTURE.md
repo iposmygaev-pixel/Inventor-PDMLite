@@ -11,54 +11,81 @@
 ## Компоненты
 
 ```
-          ┌──────────────────────┐      ┌──────────────────────┐
- Хосты:   │ PdmLite.AddIn        │      │ PdmLite.Explorer     │
-          │ (внутри Inventor)    │      │ (WPF-приложение)     │
-          └──────────┬───────────┘      └──────────┬───────────┘
-                     │   загружают одни и те же модули
-                     ▼                             ▼
-          ┌───────────────────────────────────────────────────┐
-          │ Модули: ProjectTree, Properties, ReferenceIndex,  │
-          │         Rename, Preview, …                        │
-          └───────────────────────┬───────────────────────────┘
-                                  ▼
-          ┌───────────────────────────────────────────────────┐
-          │ PdmLite.Core — домен, контракты, события, операции│
-          └───────────┬───────────────────────┬───────────────┘
-                      ▼                       ▼
-          PdmLite.Inventor          PdmLite.Apprentice
-          (Inventor API)            (Apprentice API)
-                      └───────────┬───────────┘
-                                  ▼
-                           PdmLite.Data (EF Core, PostgreSQL)
+          ┌──────────────────────┐   PdmLite.Link   ┌──────────────────────┐
+ Хосты:   │ PdmLite.AddIn        │◄── каналы ──────►│ PdmLite.Explorer     │
+          │ + PdmLite.AddIn.Core │   Windows, JSON  │ (WPF-приложение)     │
+          │ (внутри Inventor,    │                  │                      │
+          │  Inventor API)       │── процесс ──────►│ служебный режим:     │
+          └──────────┬───────────┘   свойств        │ свойства через       │
+                     │                              │ PdmLite.Apprentice   │
+                     │                              └──────────┬───────────┘
+                     │   загружают одни и те же модули         │
+                     ▼                                         ▼
+          ┌───────────────────────────────────────────────────────────┐
+          │ Модули: ProjectTree, Properties, References, Rename,      │
+          │         Library, Scripts, InventorLink (только Explorer)  │
+          └───────────────┬───────────────────────────┬───────────────┘
+                          ▼                           ▼
+          ┌──────────────────────────────┐  ┌─────────────────────────┐
+          │ PdmLite.Index — индекс ссылок,│  │ PdmLite.Library —       │
+          │ карточка проекта, операции    │  │ стандартная библиотека  │
+          │ с файлами                     │  │                         │
+          └───────────────┬──────────────┘  └────────────┬────────────┘
+                          └──────────────┬───────────────┘
+                                         ▼
+          PdmLite.Hosting (загрузка модулей, DI, настройки, журналы)
+          PdmLite.Data (EF Core, PostgreSQL)
+          PdmLite.Core — домен, контракты, события (без Inventor и WPF)
 ```
+
+Отдельных адаптеров `PdmLite.Inventor` в коде нет: работа с Inventor API находится в
+`PdmLite.AddIn.Core` (`InventorProperties`, `InventorPropertyStore`, `InventorProjects`,
+`InventorComponentPlacer`, `InventorOpenDocuments` и т.д.) и выставляется модулям через интерфейсы ядра
+(`IDocumentPropertyStore`, `IOpenDocuments`, `IComponentPlacer`, `IDocumentLauncher`, …).
+
+Запись свойств из плагина идёт не через Inventor API, а через Apprentice **в отдельном процессе**:
+плагин запускает PdmLite Explorer в служебном режиме без окна (`ApprenticeHost`, протокол — `PropertyHost`
+в ядре, одна строка JSON на запрос). Причина: внутри Inventor Apprentice не работает, а Inventor API не может
+записать копию файла Content Center, открытого в сборке.
 
 ## Структура решения
 
 ```
-PdmLite.sln
+PdmLite.sln                  # всё решение (для AddIn, AddIn.Core, Apprentice, Explorer нужен Inventor 2025)
+PdmLite.NoInventor.slnf      # всё, что собирается без Inventor: так собирает CI
 ├─ src/
-│  ├─ PdmLite.Core/          # домен, контракты, шина событий, правила имён
-│  ├─ PdmLite.Link/          # связь плагин ⇄ Explorer
-│  ├─ PdmLite.Hosting/       # загрузчик модулей, DI, настройки, журналы
-│  ├─ PdmLite.UI.Shared/     # общие WPF-стили, размещение панелей, меню команд
+│  ├─ PdmLite.Core/          # домен, контракты, шина событий, правила имён, IO (net8.0)
+│  ├─ PdmLite.Link/          # связь плагин ⇄ Explorer: именованные каналы, JSON (net8.0)
+│  ├─ PdmLite.Data/          # EF Core + PostgreSQL: схемы library.* и project.*, миграции (net8.0)
+│  ├─ PdmLite.Hosting/       # загрузчик модулей, DI, настройки, журналы (net8.0)
+│  ├─ PdmLite.Index/         # индекс ссылок, карточка проекта, переименование/перемещение (net8.0)
+│  ├─ PdmLite.Library/       # стандартная библиотека: каталог, импорт, хранилище, резервные копии (net8.0)
+│  ├─ PdmLite.UI.Shared/     # общие WPF-стили, размещение панелей, меню команд, иконки
+│  ├─ PdmLite.Apprentice/    # iProperties и ссылки через Apprentice (Inventor View)
 │  ├─ PdmLite.AddIn/         # загрузчик плагина (его видит Inventor)
-│  ├─ PdmLite.AddIn.Core/    # хост: плагин Inventor (в изолированном контексте)
-│  ├─ PdmLite.Explorer/      # хост: внешнее приложение
-│  ├─ PdmLite.Data/          # (план) EF Core, PostgreSQL
-│  ├─ PdmLite.Inventor/      # (план) iProperties и ссылки через Inventor API
-│  └─ PdmLite.Apprentice/    # (план) то же через Apprentice
+│  ├─ PdmLite.AddIn.Core/    # хост: плагин Inventor (в изолированном контексте), работа с Inventor API
+│  ├─ PdmLite.Explorer/      # хост: внешнее приложение; служебный режим «процесс свойств»
+│  └─ Shared/                # исходники, общие для нескольких проектов (имена наборов iProperties)
 ├─ modules/
-│  ├─ PdmLite.Modules.ProjectTree/
-│  ├─ PdmLite.Modules.Properties/
-│  ├─ PdmLite.Modules.InventorLink/   # только Explorer
-│  ├─ PdmLite.Modules.References/     # связи: где используется, состав, индекс проекта
-│  ├─ PdmLite.Modules.Preview/        # (план)
-│  ├─ PdmLite.Modules.Rename/         # переименование и перемещение с переносом ссылок
-│  └─ PdmLite.Modules.Scripts/        # внешние утилиты
+│  ├─ PdmLite.Modules.ProjectTree/    # дерево проекта
+│  ├─ PdmLite.Modules.Properties/     # карточка документа
+│  ├─ PdmLite.Modules.References/     # связи: где используется, состав, индекс и карточка проекта
+│  ├─ PdmLite.Modules.Rename/         # переименование и перемещение с переносом ссылок, обновление связей
+│  ├─ PdmLite.Modules.Library/        # стандартная библиотека: панель, каталог, импорт, проверки, копии
+│  ├─ PdmLite.Modules.Scripts/        # внешние утилиты
+│  └─ PdmLite.Modules.InventorLink/   # только Explorer: связь с запущенным Inventor
+├─ tools/
+│  ├─ CollectComponents/, ShortenNames/   # утилиты, поставляемые с PdmLite
+│  ├─ PdmLite.Setup/                      # загрузчик установщика
+│  └─ PdmLite.Data.Design/                # фабрика контекста для `dotnet ef migrations`
 ├─ tests/
-└─ deploy/                   # .addin-манифест, install.ps1
+│  ├─ PdmLite.Core.Tests/    # по папкам функций: Core, Hosting, Infrastructure, Link, Session, Utilities…
+│  └─ PdmLite.Library.Tests/ # по папкам функций: Backup, Items, Import, Index, Storage…; нужен PostgreSQL
+└─ deploy/                   # .addin-манифест, install.ps1, установщик (Inno Setup)
 ```
+
+Модули не ссылаются друг на друга — только на ядро и общие библиотеки (`Index`, `Library`, `Data`,
+`UI.Shared`); хосты подключают модули ссылками на проекты.
 
 ## Контракт модуля
 
@@ -74,8 +101,9 @@ public interface IPdmModule
 
 - Включение/отключение — через `modules.json`; хост проверяет зависимости.
 - UI модуль регистрирует через `IUiRegistry` (кнопки ленты, пункты контекстного меню, панели).
-- Возможности хоста — через `IHostCapabilities` (`CanEditFiles`, `HasActiveDocument`, …):
-  модуль сам скрывает недоступные действия.
+- Хост, в котором работает модуль, — `HostKind` (`Inventor`, `Explorer`): передаётся в `ConfigureServices`
+  и доступен в `IModuleContext.Host`; `ModuleInfo.SupportedHosts` ограничивает, где модуль загружается.
+  Недоступные в хосте действия модуль скрывает сам.
 
 ## Загрузка плагина в Inventor
 
@@ -121,18 +149,21 @@ Inventor 2025 загружает плагины .NET 8 в общий конте�
   при каждом запуске (или в папке установки `%LOCALAPPDATA%\PdmLite\Explorer`).
 - Explorer — единственный экземпляр: повторный запуск передаёт аргументы работающему окну.
 - Inventor API вызывается только в главном потоке Inventor (`IUiDispatcher`).
-- Общие данные (документы, связи, журнал) появятся в PostgreSQL; канал — для оперативного
+- Общие данные (индекс ссылок, библиотека, журнал библиотеки) — в PostgreSQL; канал — для оперативного
   взаимодействия («открой», «покажи», «что сейчас активно»).
 
-## Модули этапа 1
+## Модули
 
-| Модуль | Назначение |
-|---|---|
-| **References** ✔ | Индекс ссылок проекта в PostgreSQL (`project.files`, `project.file_references`, сервис `PdmLite.Index`): «из чего состоит», «где используется» (прямо и на всех уровнях), битые ссылки |
-| **ProjectTree** | Дерево проекта: папки и структура изделия; `DockableWindow` в Inventor, главное окно в Explorer |
-| **Properties** | Карточка документа; соответствие полей PDM и iProperties настраивается |
-| **Preview** | Миниатюры, просмотр PDF чертежей |
-| **Rename** | Переименование файлов и iProperties с перепривязкой ссылок и откатом |
+| Модуль | Состояние | Назначение |
+|---|---|---|
+| **ProjectTree** | сделан | Дерево проекта: папки и файлы; `DockableWindow` в Inventor, главное окно в Explorer |
+| **Properties** | сделан | Карточка документа (iProperties) |
+| **References** | сделан | Индекс ссылок проекта в PostgreSQL (`project.files`, `project.file_references`, сервис `PdmLite.Index`): «из чего состоит», «где используется» (прямо и на всех уровнях), битые ссылки; карточка состояния проекта |
+| **Rename** | сделан | Переименование и перемещение файлов и папок с переносом ссылок и откатом; «Обновить связи проекта» |
+| **Library** | сделан (шаги Б1–Б4, Б6) | Стандартная библиотека — см. [LIBRARY.md](LIBRARY.md) |
+| **Scripts** | сделан | Запуск внешних утилит из `Документы\PdmLite\Scripts` |
+| **InventorLink** | сделан | Только Explorer: связь с запущенным Inventor |
+| **Preview** | не начат | Миниатюры, просмотр PDF чертежей |
 
 ### Операция переименования
 
@@ -143,35 +174,45 @@ Validate → BuildPlan → Preview (диалог) → Backup → Execute → Upd
                                                   Rollback
 ```
 
-## Модель данных (этап 1, черновик)
+## Модель данных
+
+Контекст — `PdmDbContext` (`src/PdmLite.Data`), миграции — `src/PdmLite.Data/Migrations`.
 
 ```
-Users          (Id, Login, PasswordHash, Role, IsActive)
-Projects       (Id, Name, IpjPath, RootFolder)
-Documents      (Id, ProjectId, Path, FileName, Type, Designation, Name, LastModified, Hash)
-DocumentRefs   (ParentId, ChildId, RefType: Component | DrawingModel | Derived)
-OperationLog   (Id, Date, UserId, Operation, Payload JSON, Result)
+library.categories        разделы библиотеки (дерево)
+library.items             компоненты: обозначение, тип, стандарт, производитель, путь, версия, геометрия
+library.item_versions     прежние версии компонента (файлы — в _versions)
+library.item_properties   свойства компонента
+library.item_references   состав сборок библиотеки
+library.category_rules    правила раздела
+library.designation_rules правила замены в обозначениях
+library.log               журнал изменений библиотеки
+project.files             индекс ссылок: документы проекта (обозначение, наименование, размер, дата)
+project.file_references   индекс ссылок: ссылки между документами
 ```
 
-Расширяется без ломки схемы: `Versions`, `Lifecycle`, `Locks`, `Permissions`.
+Пользователей, ролей, проектов как сущностей и журнала операций с файлами проекта в базе пока нет:
+работает один пользователь с правами администратора (см. [DECISIONS.md](DECISIONS.md)).
 
 ## Технические особенности
 
-- Inventor API вызывается только из главного потока (`InventorDispatcher`).
+- Inventor API вызывается только из главного потока (`IUiDispatcher`).
 - Тяжёлое сканирование — в фоне, с прогрессом и отменой.
 - Apprentice требует установленного Inventor или Inventor View.
-- Хранилище файлов скрыто за `IFileStore`, чтобы позже перейти на хранилище с версиями
-  (check-in / check-out) без переделки модулей.
+- Файлы проекта читаются и пишутся напрямую в рабочей папке; файлы библиотеки — через `LibraryStorage`
+  (`PdmLite.Library.Storage`). Общей абстракции хранилища с версиями (check-in / check-out) пока нет —
+  её нужно будет ввести перед этапом 2.
 
 ## Порядок реализации
 
-1. Core, Hosting, каркасы AddIn и Explorer.
-2. Data (PostgreSQL), адаптеры Inventor и Apprentice.
-3. ReferenceIndex.
-4. ProjectTree.
-5. Properties, Preview.
-6. Rename.
-7. Тесты, установщик, документация.
+1. ✔ Core, Hosting, каркасы AddIn и Explorer.
+2. ✔ Data (PostgreSQL); работа с Inventor API (в AddIn.Core) и Apprentice.
+3. ✔ Индекс ссылок (References).
+4. ✔ ProjectTree.
+5. ✔ Properties; Preview — не начат.
+6. ✔ Rename.
+7. ✔ Стандартная библиотека (Б1–Б4, Б6).
+8. ✔ Тесты, установщик, документация.
 
 ## Индекс ссылок проекта
 
