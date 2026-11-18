@@ -1,0 +1,26 @@
+{
+  "solution": {
+    "path": "PdmLite.sln",
+    "projects": [
+      "modules\\PdmLite.Modules.InventorLink\\PdmLite.Modules.InventorLink.csproj",
+      "modules\\PdmLite.Modules.Library\\PdmLite.Modules.Library.csproj",
+      "modules\\PdmLite.Modules.ProjectTree\\PdmLite.Modules.ProjectTree.csproj",
+      "modules\\PdmLite.Modules.Properties\\PdmLite.Modules.Properties.csproj",
+      "modules\\PdmLite.Modules.References\\PdmLite.Modules.References.csproj",
+      "modules\\PdmLite.Modules.Rename\\PdmLite.Modules.Rename.csproj",
+      "modules\\PdmLite.Modules.Scripts\\PdmLite.Modules.Scripts.csproj",
+      "src\\PdmLite.Core\\PdmLite.Core.csproj",
+      "src\\PdmLite.Data\\PdmLite.Data.csproj",
+      "src\\PdmLite.Hosting\\PdmLite.Hosting.csproj",
+      "src\\PdmLite.Index\\PdmLite.Index.csproj",
+      "src\\PdmLite.Library\\PdmLite.Library.csproj",
+      "src\\PdmLite.Link\\PdmLite.Link.csproj",
+      "src\\PdmLite.UI.Shared\\PdmLite.UI.Shared.csproj",
+      "tests\\PdmLite.Core.Tests\\PdmLite.Core.Tests.csproj",
+      "tests\\PdmLite.Library.Tests\\PdmLite.Library.Tests.csproj",
+      "tools\\CollectComponents\\CollectComponents.csproj",
+      "tools\\PdmLite.Data.Design\\PdmLite.Data.Design.csproj",
+      "tools\\ShortenNames\\ShortenNames.csproj"
+    ]
+  }
+}

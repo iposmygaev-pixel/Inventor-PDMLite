@@ -1,4 +1,4 @@
-name: Windows tests
+name: Windows build and tests
 
 on:
   push:
@@ -36,6 +36,10 @@ jobs:
             }
           } | ConvertTo-Json | Set-Content -LiteralPath global.json -Encoding utf8
           dotnet --version
+      - name: Build all projects that do not need Inventor (modules, WPF UI, tools, tests)
+        # AddIn, AddIn.Core, Apprentice and Explorer need Autodesk.Inventor.Interop.dll
+        # from an installed Inventor 2025, so they are left out of PdmLite.NoInventor.slnf.
+        run: dotnet build PdmLite.NoInventor.slnf -c Release
       - name: Test core, settings, IPC and file utilities on Windows
         run: dotnet test tests/PdmLite.Core.Tests -c Release --logger "trx;LogFileName=windows-core.trx" --results-directory TestResults
       - name: Test update, uninstall and secret option-file permissions

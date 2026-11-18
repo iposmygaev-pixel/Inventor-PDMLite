@@ -3,12 +3,21 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Предупреждения компилятора — ошибки сборки. Предупреждения NuGet об уязвимостях пакетов
+         (NU1901–NU1904) ошибками не считаются: они появляются без изменений в коде. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
     <Company>PdmLite</Company>
     <Product>PdmLite</Product>
     <Version>0.1.0</Version>
     <!-- Позволяет собирать WPF/WinForms-проекты не на Windows (CI, проверка сборки). -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <!-- Проекты с Inventor API собираются только на машине с Inventor 2025, в CI их не проверить.
+       Для них предупреждения пока не считаются ошибками: включить после проверки сборки с Inventor. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'PdmLite.AddIn' Or '$(MSBuildProjectName)' == 'PdmLite.AddIn.Core' Or '$(MSBuildProjectName)' == 'PdmLite.Apprentice' Or '$(MSBuildProjectName)' == 'PdmLite.Explorer'">
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
 </Project>
